@@ -6,16 +6,18 @@ The default mode is fully offline: requests are encoded, decoded and handled in 
 
 ## Quick start
 
-Install Go 1.25 or later, then:
+Install Go 1.25 or later and Make, then:
 
 ```sh
 git clone git@github.com:cybergarage/uecho-simulator.git
 cd uecho-simulator
-git switch feat/fullscreen-tui # current draft UI branch
 go mod download
-go run ./cmd/uecho-simulator --demo --plain --preview room.svg
-go run ./cmd/uecho-simulator --preview room.svg
+make help
+make preview
+make tui
 ```
+
+`make tui` starts the interactive full-screen UI. `make preview` generates room.svg from the offline evening scenario and exits; `make demo` prints that scenario and exits without generating a preview. `make help` lists these four targets. Go commands use the pinned dependency with `GOWORK=off`. Generated room.svg is ignored by Git.
 
 Open room.svg in a browser or image viewer. It is a static 800×480 black/white room and state view. The SVG file updates after local terminal commands; reload the viewer to see the latest state. No web server or hardware refresh loop is included.
 
@@ -49,7 +51,8 @@ At widths below 85 columns or heights below 26 rows, the UI stacks Devices and A
 The offline demo and SVG export remain available for automation:
 
 ```sh
-go run ./cmd/uecho-simulator --demo --plain --preview room.svg
+make demo
+make preview
 ```
 
 `--plain` retains the earlier line interface for piped input, rather than opening a full-screen UI:
