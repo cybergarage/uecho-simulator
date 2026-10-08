@@ -1,4 +1,4 @@
-// Package tui provides an offline command-driven terminal dashboard.
+// Package tui provides selection and plain interfaces for offline virtual devices.
 package tui
 
 import (

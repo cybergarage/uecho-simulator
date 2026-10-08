@@ -47,10 +47,14 @@ func validateFrame(b []byte) error {
 func (e *Engine) Handle(b []byte, source string) ([]byte, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.handle(b, source)
+	return e.handle(b, source, false)
 }
-func (e *Engine) handle(b []byte, source string) ([]byte, error) {
-	e.store.Log("RX", source, "request", b)
+func (e *Engine) handle(b []byte, source string, simulated bool) ([]byte, error) {
+	rx, tx := "RX", "TX"
+	if simulated {
+		rx, tx = "SIM-RX", "SIM-TX"
+	}
+	e.store.Log(rx, source, "request", b)
 	if err := validateFrame(b); err != nil {
 		e.store.Log("ERROR", source, err.Error(), nil)
 		return nil, err
@@ -94,7 +98,7 @@ func (e *Engine) handle(b []byte, source string) ([]byte, error) {
 		}
 	}
 	out := res.Bytes()
-	e.store.Log("TX", source, fmt.Sprintf("response ESV %02X", byte(res.ESV())), out)
+	e.store.Log(tx, source, fmt.Sprintf("response ESV %02X", byte(res.ESV())), out)
 	return out, nil
 }
 
@@ -114,7 +118,7 @@ func (e *Engine) Request(eoj uint32, epc byte, data []byte, write bool, source s
 	p := protocol.NewPropertyWithCode(protocol.PropertyCode(epc))
 	p.SetData(data)
 	req.AddProperty(p)
-	b, err := e.handle(req.Bytes(), source)
+	b, err := e.handle(req.Bytes(), source, true)
 	if err != nil {
 		return nil, err
 	}
