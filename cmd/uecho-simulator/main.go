@@ -30,7 +30,7 @@ func run(args []string, in io.Reader, out io.Writer) error {
 	flags := flag.NewFlagSet("uecho-simulator", flag.ContinueOnError)
 	flags.SetOutput(out)
 	demo := flags.Bool("demo", false, "run the evening scenario and exit without networking")
-	plain := flags.Bool("plain", false, "disable terminal escape sequences")
+	plain := flags.Bool("plain", false, "use the plain line interface for piping (default: full-screen TUI)")
 	image := flags.String("preview", "", "write an 800x480 monochrome SVG after state changes")
 	udp := flags.String("udp", "", "opt in to loopback UDP, e.g. 127.0.0.1:3610")
 	if err := flags.Parse(args); err != nil {
@@ -38,6 +38,9 @@ func run(args []string, in io.Reader, out io.Writer) error {
 	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("unexpected arguments")
+	}
+	if *udp != "" && !*plain {
+		return fmt.Errorf("optional UDP requires --plain; the full-screen TUI is offline")
 	}
 	if *demo && *udp != "" {
 		return fmt.Errorf("demo cannot enable UDP")
@@ -59,7 +62,7 @@ func run(args []string, in io.Reader, out io.Writer) error {
 				fmt.Fprintln(os.Stderr, err)
 			}
 		}()
-	} else {
+	} else if *demo || *plain {
 		fmt.Fprintln(out, "OFFLINE: frames in memory; no network or hardware")
 	}
 	if *demo {
@@ -68,6 +71,12 @@ func run(args []string, in io.Reader, out io.Writer) error {
 		}
 		u.Draw(out)
 		return preview(*image, s.Snapshot())
+	}
+	if !*plain {
+		if err := preview(*image, s.Snapshot()); err != nil {
+			return err
+		}
+		return tui.NewDashboard(s, e, func(s model.Snapshot) error { return preview(*image, s) }).Run(ctx)
 	}
 	u.Draw(out)
 	if err := preview(*image, s.Snapshot()); err != nil {
