@@ -1,0 +1,30 @@
+name: Check
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  check:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.x'
+          cache: true
+      - name: Download pinned dependency
+        env:
+          GOWORK: off
+        run: go mod download
+      - name: Check without network (Linux)
+        if: runner.os == 'Linux'
+        run: sudo unshare --net env PATH="$PATH" GOCACHE="$(go env GOCACHE)" GOMODCACHE="$(go env GOMODCACHE)" ./scripts/check.sh
+      - name: Check without network (Mac)
+        if: runner.os == 'macOS'
+        run: sandbox-exec -p '(version 1)(allow default)(deny network*)' ./scripts/check.sh
