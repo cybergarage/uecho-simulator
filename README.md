@@ -2,14 +2,14 @@
 
 A small ECHONET Lite room simulator powered by [uecho-go](https://github.com/cybergarage/uecho-go). It runs on Mac/Linux and Raspberry Pi 4/5 without extra equipment. Raspberry Pi Pico is outside this project's scope.
 
-The default mode is fully offline: requests are encoded, decoded and handled in memory. It opens no sockets, discovers no devices and sends no advertisements. The prototype implements explicit small profiles, not complete ECHONET Lite/MRA compliance.
+The default mode is fully offline: requests are encoded, decoded and handled in memory. It opens no sockets, discovers no devices and sends no advertisements. The virtual profiles target ECHONET Lite v1.14 and Appendix Release R rev.4. See the supported properties and transport modes below; this is not a certified appliance or an implementation of the entire MRA.
 
 ## Quick start
 
 Install Go 1.25 or later and Make, then:
 
 ```sh
-git clone git@github.com:cybergarage/uecho-simulator.git
+git clone https://github.com/cybergarage/uecho-simulator.git
 cd uecho-simulator
 go mod download
 make help
@@ -74,13 +74,25 @@ Preview starts with controller input disabled. To accept a controller on this ma
 make preview PREVIEW_ARGS='--udp 127.0.0.1:3610'
 ```
 
-For a later test from a separate LAN controller, first confirm the simulator's own local IPv4 address, that the interface belongs to the intended isolated/test network, that port 3610 is available, and that the controller supports manually addressed unicast Get/SetC for the listed EOJs. Replace `192.168.1.50` with that confirmed address:
+For a later test from a separate LAN controller, first confirm the simulator's own local IPv4 address, that the interface belongs to the intended isolated/test network, that port 3610 is available, and that the controller supports manually addressed unicast for the listed EOJs. Replace `192.168.1.50` with that confirmed address:
 
 ```sh
 make preview PREVIEW_ARGS='--udp 192.168.1.50:3610 --allow-lan'
 ```
 
-Only this explicit opt-in permits a local unicast LAN UDP bind. HTTP always remains loopback: open the browser on the simulator machine. There is no discovery, multicast membership, advertisement, INF or node-profile service; discovery-dependent controllers will not find this prototype. SetC updates the same model shown in the display; Get reads it. Sensor temperature remains read only. This task tested loopback and injected events only, not household LAN or physical devices.
+Only this explicit opt-in permits a local unicast LAN UDP bind. HTTP always remains loopback: open the browser on the simulator machine. Unicast mode can answer node-profile discovery addressed to its IP, but it does not join a multicast group. Responses go to the sender's IP at **UDP port 3610**, even when the request originates from a different port. A controller must therefore listen on 3610.
+
+To enable standard IPv4 multicast discovery on a deliberately selected test-network interface, add its actual interface name (for example `en0` on Mac or `eth0` on Linux):
+
+```sh
+make preview PREVIEW_ARGS='--udp 192.168.1.50:3610 --allow-lan --multicast-interface en0'
+```
+
+The bind IP must belong to that interface, and the port must be 3610. This mode joins **224.0.23.0:3610**, answers incoming discovery, sends one D5 instance-list INF at startup, and broadcasts required status-change INF and successful INF_REQ results. It never scans or sends discovery requests to other devices. Incoming unicast and multicast requests use the same engine. Unknown EOJs receive no response; instance 00 is expanded to each matching concrete instance.
+
+Without `--multicast-interface`, startup advertisements are disabled. Changes are delivered by unicast to up to 64 controller IPs that have made valid requests to known objects in the last five minutes; successful INF_REQ results return to the requester. This is an isolated/manual-controller mode, **not standard multicast discovery or broadcast delivery**. Notification queues preserve each transition; if a consumer falls behind their 256-entry bound, the UDP service stops with an error rather than silently discarding required announcements.
+
+SetC/SetI/SetGet update the shared model shown in the display; Get and INF_REQ read it. Sensor temperature remains read only over ECHONET. The temperature scenario emits sensor E0 and AC BB notifications. This work tested injected multicast paths and real localhost sockets only; Ubuntu CI additionally exercises OS multicast membership/startup/discovery on a dummy interface in an isolated network namespace. Physical interfaces, macOS multicast, household LAN and physical appliances have not been exercised.
 
 A browser has no mutation or shutdown endpoint. The LAN UDP prototype has no authentication, so use only the intended test network and stop it from the launching terminal afterward. No firewall or permissions are changed by the program.
 
@@ -103,15 +115,31 @@ In-memory frames are labelled `SIM-RX`/`SIM-TX`; these are simulated events, not
 
 ## Implemented profiles
 
-| Device | EOJ | Properties beyond common status/maps |
+The normative basis is [ECHONET Lite v1.14 Part II](https://echonet.jp/wp/wp-content/uploads/pdf/General/Standard/ECHONET_lite_V1_14_en/ECHONET-Lite_Ver.1.14(02)_E.pdf) (services, instance 00, UDP addressing and node startup) and [Appendix Release R rev.4](https://echonet.jp/wp/wp-content/uploads/pdf/General/Standard/Release/Release_R/Appendix_Release_R_rev4_E.pdf) (device superclass, 0290, 0130, 0011 and 0EF0). The implementation uses explicit virtual profiles and does not inherit all optional properties from MRA.
+
+| Object | EOJ | Class-specific properties | Set | Change INF |
+| --- | --- | --- | --- | --- |
+| Node profile | 0EF001 | D3 instance count; D4 class count including profile; D5/D6 device instance lists; D7 device class list | None | D5 on multicast startup |
+| General lighting | 029001 | B0 brightness 0–100%; B6 main lighting (42) only | B0, B6 | B0 |
+| Home air conditioner | 013001 | 8F power saving; A0 airflow auto/1–8; B0 other/auto/cool/heat/dry/fan; B3 target 0–50°C; BB signed room temperature | 8F, A0, B0, B3 | 8F, A0, B0, B3, BB |
+| Temperature sensor | 001101 | E0 signed big-endian temperature in 0.1°C | None | E0 |
+
+Device common EPCs are 80 operation status, 81 installation location (one-byte code or 17-byte position), 82 standard version (`00005204`: R revision 4), 83 identification, 88 fault status (no fault), 8A manufacturer, and 9D/9E/9F announcement/Set/Get maps. Operation status is writable for light/AC; the sensor is always on and read only. Location is writable for all three. Required change announcements cover 80/81/88; fixed read-only properties never change during a process. Optional announced properties are listed above. Node common EPCs are 80, 82 (`010e0100`: middleware 1.14, Format 1), 83, 8A and the three maps; node status is always on and read only. Maps declare precisely the supported access/announcement behavior, using property-map Format 1 below 16 entries and Format 2 at 16 or more. This is distinct from the Format 1 ECHONET frame header.
+
+D3 reports three devices; D4 reports four classes including the node profile. D5/D6 contain the three device EOJs; D7 contains their three class codes. Identification is generated once per process with an experimental FFFFFF manufacturer prefix and remains stable until restart. It is not an assigned manufacturer identity. The optional automatic-temperature-control function is absent, so B3 writes accept only numeric 0–50°C; FD is rejected rather than inventing an indeterminable target. State is volatile; the simulator does not persist controller writes or simulate heating/cooling physics, timers, automatic lighting or color lighting.
+
+| Request | Success | Failure / behavior |
 | --- | --- | --- |
-| General lighting | 029001 | B0: brightness 0–100% |
-| Home air conditioner | 013001 | B0: cool/heat/fan; B3: target 16–30°C; BB: room temperature |
-| Temperature sensor | 001101 | E0: signed big-endian temperature in 0.1°C, read only |
+| SetI 60 | No response | SetI_SNA 50; successful individual writes still apply |
+| SetC 61 | Set_Res 71 | SetC_SNA 51 |
+| Get 62 | Get_Res 72 | Get_SNA 52; unsupported EPCs have PDC 0 |
+| INF_REQ 63 | INF 73 (multicast in multicast mode) | INF_SNA 53 (unicast) |
+| SetGet 6E | SetGet_Res 7E, separate Set/Get OPC blocks | SetGet_SNA 5E; writes are processed before reads |
+| INFC 74 | INFC_Res 7A with the same EPCs and PDC 0 | Unknown destination is ignored; receiving INFC does not write our model |
 
-Common EPCs: 80 operation status, 88 fault status, 8A experimental manufacturer value FFFFFF, 9D empty announcement map, 9E Set map, 9F Get map. Maps describe only implemented properties and currently fit Format 1. No full MRA object/property set is inherited. Get and SetC are supported, including error responses and multiple-property frames. Rejected individual writes do not change their state; a multi-property request may apply valid writes before returning an error for another property.
+Multiple properties and partial failures are supported. Valid writes may apply even if another property is rejected; these requests are not transactions. Malformed/trailing/oversized input is rejected before state mutation. Responses are bounded to 1024 bytes; if values would exceed the limit, a processed prefix is returned as SNA. Incoming responses and INF do not trigger response loops. uecho-go supplies the message/property codec; a small adapter represents SetGet's two property blocks because the pinned Message API exposes one block.
 
-Not implemented: node profile/discovery, INF notifications, SetI/SetGet, complete MRA conformance, device persistence, physical appliances, Sense HAT/e-paper drivers. The sensor always reports powered on and cannot be written over the protocol.
+Not implemented: IPv6 transport, every optional MRA property, appliance certification, persistent state, real appliances, Sense HAT/e-paper drivers. Physical Raspberry Pi and multicast on real interfaces remain unverified.
 
 ## Optional loopback transport
 
@@ -121,11 +149,11 @@ Networking is disabled unless explicitly requested:
 go run ./cmd/uecho-simulator --udp 127.0.0.1:3610 --plain
 ```
 
-This prototype accepts only a literal IPv4 loopback bind. Wildcard, multicast, hostname and LAN addresses are refused. It responds only to received requests and does not scan or advertise. UDP mode is excluded from `--demo`. The legacy plain interface redraws on local commands; use the browser preview for event-driven updates from UDP. Exit with `quit` or Ctrl-C.
+This plain mode accepts only a literal IPv4 loopback bind. Wildcard, multicast, hostname and LAN addresses are refused here; the preview mode has the separate explicit LAN/multicast options above. It does not scan or send startup advertisements. Responses and notifications target port 3610. UDP mode is excluded from `--demo`. The legacy plain interface redraws on local commands; use the browser preview for event-driven updates from UDP. Exit with `quit` or Ctrl-C.
 
 ## Raspberry Pi 4/5
 
-Use a 64-bit Raspberry Pi OS/Linux installation and a Go 1.25+ arm64 toolchain. No GPIO, SPI, HAT configuration or privilege changes are needed for the offline demo. The repository is private, so use an existing authorized GitHub credential for checkout.
+Use a 64-bit Raspberry Pi OS/Linux installation and a Go 1.25+ arm64 toolchain. No GPIO, SPI, HAT configuration or privilege changes are needed for the offline demo. The repository is public; HTTPS checkout needs no private-repository credential.
 
 On a Mac or Linux development machine, build the portable binary:
 
@@ -158,4 +186,6 @@ CI sets `GOWORK=off` to check the pinned dependency rather than a local checkout
 ./scripts/check.sh
 ```
 
-Checks include formatting, vet, tests/race (including tcell keyboard events, form apply/cancel, search targeting, resize and screen finalization), darwin/arm64 and linux/arm64 builds, and an offline SVG demo. Default checks use injected frames and deny network access. The separate opt-in `SIMULATOR_LOOPBACK_TEST=1 GOWORK=off go test -race ./internal/preview -run TestLoopbackControllerToDisplay` binds only 127.0.0.1 and verifies UDP request/response, model propagation, event delivery and shutdown. CI denies network access during checks after downloading dependencies. The initial work-in-progress archive remains preserved separately; no source-library checkout was modified during migration.
+Checks include formatting, vet, tests/race (including tcell keyboard events, form apply/cancel, search targeting, resize and screen finalization), darwin/arm64 and linux/arm64 builds, and an offline SVG demo. Default checks use injected frames and deny network access. The separate opt-in `SIMULATOR_LOOPBACK_TEST=1 GOWORK=off go test -race ./internal/preview -run TestLoopbackControllerToDisplay` binds only 127.0.0.1 and verifies UDP request/response, model propagation, event delivery and shutdown. CI denies network access during checks after downloading dependencies, then runs the opt-in socket test in a separate Linux network namespace with only loopback enabled, plus IPv4 multicast integration on a dummy interface in another isolated namespace. Injected multicast tests cover startup, discovery, response addressing, notifications and shutdown without host sockets. The initial work-in-progress archive remains preserved separately; no source-library checkout was modified during migration.
+
+Release preparation, package reproducibility and verification limits are recorded in [docs/RELEASE.md](docs/RELEASE.md).

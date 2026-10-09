@@ -18,89 +18,149 @@ type Engine struct {
 
 func New(s *model.Store) *Engine { return &Engine{store: s} }
 
-// validateFrame rejects truncation/trailing bytes before passing data to the
-// library parser. Only Get and SetC are implemented by this prototype.
-func validateFrame(b []byte) error {
-	if len(b) < 12 || len(b) > 1024 || b[0] != 0x10 || b[1] != 0x81 || b[11] == 0 {
-		return fmt.Errorf("invalid Format 1 frame")
-	}
-	if b[10] != 0x61 && b[10] != 0x62 {
-		return fmt.Errorf("only Get (62) and SetC (61) are implemented")
-	}
-	pos := 12
-	for i := 0; i < int(b[11]); i++ {
-		if pos+2 > len(b) {
-			return fmt.Errorf("truncated property")
-		}
-		n := int(b[pos+1])
-		pos += 2 + n
-		if pos > len(b) {
-			return fmt.Errorf("truncated EDT")
-		}
-	}
-	if pos != len(b) {
-		return fmt.Errorf("trailing frame bytes")
-	}
-	return nil
-}
-
+// Handle is the single-instance convenience API. UDP uses HandleAll so wildcard
+// requests can produce one response for every matching concrete instance.
 func (e *Engine) Handle(b []byte, source string) ([]byte, error) {
+	all, err := e.HandleAll(b, source)
+	if err != nil || len(all) == 0 {
+		return nil, err
+	}
+	return all[0], nil
+}
+func (e *Engine) HandleAll(b []byte, source string) ([][]byte, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.handle(b, source, false)
+	return e.handleAll(b, source, false)
 }
-func (e *Engine) handle(b []byte, source string, simulated bool) ([]byte, error) {
+func (e *Engine) handleAll(b []byte, source string, simulated bool) ([][]byte, error) {
 	rx, tx := "RX", "TX"
 	if simulated {
 		rx, tx = "SIM-RX", "SIM-TX"
 	}
-	e.store.Log(rx, source, "request", b)
-	if err := validateFrame(b); err != nil {
+	req, get, err := parseRequest(b)
+	if err != nil {
+		e.store.Log(rx, source, "rejected frame", b)
 		e.store.Log("ERROR", source, err.Error(), nil)
 		return nil, err
 	}
-	req, err := protocol.NewMessageWithBytes(b)
-	if err != nil {
-		return nil, err
-	}
-	if req.DEOJ() != protocol.ObjectCode(model.Light) && req.DEOJ() != protocol.ObjectCode(model.Aircon) && req.DEOJ() != protocol.ObjectCode(model.Sensor) {
+	esv := req.ESV()
+	if esv != 0x60 && esv != 0x61 && esv != 0x62 && esv != 0x63 && esv != 0x6e && esv != 0x74 {
 		return nil, nil
 	}
-	res := protocol.NewResponseMessageWithMessage(req)
-	failed := false
-	for _, p := range req.Properties() {
-		answer := protocol.NewPropertyWithCode(p.Code())
-		if req.ESV() == protocol.ESVReadRequest {
-			data, readErr := e.store.Read(uint32(req.DEOJ()), byte(p.Code()))
-			if p.Size() != 0 {
-				readErr = fmt.Errorf("Get requires empty EDT")
+	e.store.Log(rx, source, "request", b)
+	out := [][]byte{}
+	for _, target := range e.store.Targets(uint32(req.DEOJ())) {
+		res := protocol.NewResponseMessageWithMessage(req)
+		res.SetSEOJ(protocol.ObjectCode(target))
+		failed := false
+		var getRes *protocol.Message
+		if get != nil {
+			getRes = protocol.NewResponseMessageWithMessage(get)
+			getRes.SetSEOJ(protocol.ObjectCode(target))
+		}
+		appendAnswer := func(message *protocol.Message, p protocol.Property, read bool) {
+			answer := protocol.NewPropertyWithCode(p.Code())
+			if esv == 0x74 {
+				message.AddProperty(answer)
+				return
 			}
-			if readErr != nil {
-				failed = true
-				e.store.Log("ERROR", source, readErr.Error(), nil)
+			if read {
+				data, readErr := e.store.Read(target, byte(p.Code()))
+				if p.Size() != 0 {
+					readErr = fmt.Errorf("read requires empty EDT")
+				}
+				if readErr != nil {
+					failed = true
+					e.store.Log("ERROR", source, readErr.Error(), nil)
+				} else {
+					answer.SetData(data)
+				}
 			} else {
-				answer.SetData(data)
+				if writeErr := e.store.Write(target, byte(p.Code()), p.Data(), source); writeErr != nil {
+					failed = true
+					answer.SetData(p.Data())
+					e.store.Log("ERROR", source, writeErr.Error(), nil)
+				}
 			}
-		} else {
-			if writeErr := e.store.Write(uint32(req.DEOJ()), byte(p.Code()), p.Data(), source); writeErr != nil {
-				failed = true
-				answer.SetData(p.Data())
-				e.store.Log("ERROR", source, writeErr.Error(), nil)
+			message.AddProperty(answer)
+		}
+		for _, p := range req.Properties() {
+			appendAnswer(res, p, esv == 0x62 || esv == 0x63)
+		}
+		if get != nil {
+			for _, p := range get.Properties() {
+				appendAnswer(getRes, p, true)
 			}
 		}
-		res.AddProperty(answer)
-	}
-	if failed {
-		if req.ESV() == protocol.ESVReadRequest {
-			res.SetESV(protocol.ESVReadRequestError)
-		} else {
-			res.SetESV(protocol.ESVWriteRequestResponseRequiredError)
+		if esv == 0x60 && !failed {
+			continue
 		}
+		if failed {
+			res.SetESV(protocol.ESV(byte(esv) - 0x10))
+		}
+		if esv == 0x60 {
+			res.SetESV(0x50)
+		}
+		// A bounded response reports the processed prefix rather than emitting an
+		// oversized datagram. SetGet_SNA may contain zero properties in either block.
+		if len(combinedBytes(res, getRes)) > MaxFrameSize {
+			res.SetESV(protocol.ESV(byte(esv) - 0x10))
+			first := protocol.NewResponseMessageWithMessage(req)
+			first.SetSEOJ(protocol.ObjectCode(target))
+			first.SetESV(res.ESV())
+			var second *protocol.Message
+			if getRes != nil {
+				second = protocol.NewResponseMessageWithMessage(get)
+				second.SetSEOJ(protocol.ObjectCode(target))
+				second.SetESV(res.ESV())
+			}
+			budget := MaxFrameSize - 12
+			if second != nil {
+				budget--
+			}
+			for _, p := range res.Properties() {
+				cost := 2 + p.Size()
+				if cost > budget {
+					break
+				}
+				first.AddProperty(p)
+				budget -= cost
+			}
+			if second != nil {
+				for _, p := range getRes.Properties() {
+					cost := 2 + p.Size()
+					if cost > budget {
+						break
+					}
+					second.AddProperty(p)
+					budget -= cost
+				}
+			}
+			res, getRes = first, second
+		}
+		encoded := combinedBytes(res, getRes)
+		out = append(out, encoded)
+		e.store.Log(tx, source, fmt.Sprintf("response ESV %02X", res.ESV()), encoded)
 	}
-	out := res.Bytes()
-	e.store.Log(tx, source, fmt.Sprintf("response ESV %02X", byte(res.ESV())), out)
 	return out, nil
 }
+
+// Notifications use the upstream serializer; broadcasts target the node profile.
+func (e *Engine) Notification(change model.Change) []byte {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.tid = (e.tid + 1) & 0xffff
+	msg := protocol.NewMessage()
+	_ = msg.SetTID(e.tid)
+	msg.SetSEOJ(protocol.ObjectCode(change.EOJ))
+	msg.SetDEOJ(protocol.ObjectCode(model.Node))
+	msg.SetESV(protocol.ESVNotification)
+	p := protocol.NewPropertyWithCode(protocol.PropertyCode(change.EPC))
+	p.SetData(change.Data)
+	msg.AddProperty(p)
+	return msg.Bytes()
+}
+func (e *Engine) Store() *model.Store { return e.store }
 
 // Request executes the same frames as UDP without opening a socket.
 func (e *Engine) Request(eoj uint32, epc byte, data []byte, write bool, source string) ([]byte, error) {
@@ -118,13 +178,14 @@ func (e *Engine) Request(eoj uint32, epc byte, data []byte, write bool, source s
 	p := protocol.NewPropertyWithCode(protocol.PropertyCode(epc))
 	p.SetData(data)
 	req.AddProperty(p)
-	b, err := e.handle(req.Bytes(), source, true)
+	responses, err := e.handleAll(req.Bytes(), source, true)
 	if err != nil {
 		return nil, err
 	}
-	if b == nil {
+	if len(responses) == 0 {
 		return nil, fmt.Errorf("unknown device")
 	}
+	b := responses[0]
 	res, err := protocol.NewMessageWithBytes(b)
 	if err != nil {
 		return nil, err

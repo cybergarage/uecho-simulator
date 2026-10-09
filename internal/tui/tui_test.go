@@ -24,7 +24,7 @@ func TestScenarioAndCommands(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, cmd := range []string{"light 101", "light cool", "ac 31", "temp NaN", "temp +Inf", "temp 22.22", "temp 51", "unknown", "quit extra"} {
+	for _, cmd := range []string{"ac undefined", "ac 253", "light 101", "light cool", "ac 51", "temp NaN", "temp +Inf", "temp 22.22", "temp 51", "unknown", "quit extra"} {
 		if _, err := u.Command(cmd, &out); err == nil {
 			t.Fatalf("accepted %q", cmd)
 		}
@@ -35,5 +35,23 @@ func TestScenarioAndCommands(t *testing.T) {
 	}
 	if quit, err := u.Command("quit", &out); !quit || err != nil {
 		t.Fatal("quit failed")
+	}
+}
+
+func TestProtocolSetpointRangeAndUndefinedDisplay(t *testing.T) {
+	s := model.New()
+	u := UI{Store: s, Engine: wire.New(s), Plain: true}
+	var out bytes.Buffer
+	for _, cmd := range []string{"ac 0", "ac 50", "ac auto", "ac dry", "ac other"} {
+		if _, err := u.Command(cmd, &out); err != nil {
+			t.Fatal(cmd, err)
+		}
+	}
+	u.Draw(&out)
+	if !bytes.Contains(out.Bytes(), []byte("target=50 C")) {
+		t.Fatal(out.String())
+	}
+	if (model.Device{Target: 0xfd}).TargetLabel() != "UNDEFINED" {
+		t.Fatal("sentinel display")
 	}
 }

@@ -32,7 +32,7 @@ func TestValuesAndIsolation(t *testing.T) {
 		eoj  uint32
 		epc  byte
 		data []byte
-	}{{Light, 0xb0, []byte{101}}, {Aircon, 0xb3, []byte{15}}, {Aircon, 0xb0, []byte{0}}, {Sensor, 0xe0, []byte{1}}, {Light, 0x80, nil}, {0, 0x80, []byte{0x30}}} {
+	}{{Light, 0xb0, []byte{101}}, {Aircon, 0xb3, []byte{51}}, {Aircon, 0xb0, []byte{0}}, {Sensor, 0xe0, []byte{1}}, {Light, 0x80, nil}, {0, 0x80, []byte{0x30}}} {
 		if err := s.Write(c.eoj, c.epc, c.data, "bad"); err == nil {
 			t.Fatal("accepted invalid write")
 		}
