@@ -4,8 +4,8 @@ GO ?= go
 
 help:
 	@printf '%s\n' \
-	  'make tui     - Start the full-screen offline TUI; update room.svg' \
-	  'make preview - Keep a read-only browser display running at localhost:8080' \
+	  'make tui     - Start the full-screen network TUI; update room.svg' \
+	  'make preview - Keep a read-only browser display running at localhost:8080 with ECHONET networking' \
 	  'make export  - Generate room.svg from the offline evening demo, then exit' \
 	  'make demo    - Run the offline evening demo in plain text, then exit' \
 	  'make help    - Show this target list'

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -19,6 +20,16 @@ import (
 	"github.com/gdamore/tcell/v2"
 )
 
+type transport interface {
+	Address() string
+	Serve(context.Context) error
+	Close() error
+}
+
+var listenTransport = func(address string, engine *wire.Engine, allowLAN bool, name string) (transport, error) {
+	return wire.ListenConfigured(address, engine, allowLAN, name)
+}
+
 func preview(path string, s model.Snapshot) error {
 	if path == "" {
 		return nil
@@ -32,37 +43,50 @@ func preview(path string, s model.Snapshot) error {
 func run(args []string, in io.Reader, out io.Writer) error {
 	flags := flag.NewFlagSet("uecho-simulator", flag.ContinueOnError)
 	flags.SetOutput(out)
+	offline := flags.Bool("offline", false, "disable UDP and multicast networking")
+	interfaceName := flags.String("interface", "", "network interface (automatically selected when only one is usable)")
 	demo := flags.Bool("demo", false, "run the evening scenario and exit without networking")
 	plain := flags.Bool("plain", false, "use the plain line interface for piping (default: full-screen TUI)")
 	image := flags.String("preview", "", "write an 800x480 monochrome SVG after state changes")
 	displayAddress := flags.String("display", "", "read-only browser display on literal loopback address, e.g. 127.0.0.1:8080")
-	allowLAN := flags.Bool("allow-lan", false, "explicitly permit UDP binding on a local LAN IPv4 address; no discovery unless --multicast-interface is set")
-	multicast := flags.String("multicast-interface", "", "explicit IPv4 ECHONET discovery/notifications on a named test-network interface")
-	udp := flags.String("udp", "", "opt in to loopback UDP, e.g. 127.0.0.1:3610")
+	allowLAN := flags.Bool("allow-lan", false, "legacy: permit LAN binding with --udp; prefer --interface")
+	multicast := flags.String("multicast-interface", "", "legacy: join IPv4 multicast with --udp and --allow-lan; prefer --interface")
+	udp := flags.String("udp", "", "legacy: use explicit unicast bind, e.g. 127.0.0.1:3610")
 	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return err
 	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("unexpected arguments")
 	}
-	if *multicast != "" && (!*allowLAN || *displayAddress == "" || *udp == "") {
-		return fmt.Errorf("--multicast-interface requires --display, --udp and --allow-lan")
+	if (*offline || *demo) && (*udp != "" || *multicast != "" || *allowLAN || *interfaceName != "") {
+		return fmt.Errorf("--offline/--demo cannot combine with network flags")
 	}
-	if *allowLAN && (*displayAddress == "" || *udp == "") {
-		return fmt.Errorf("--allow-lan requires --display and --udp")
+	if *interfaceName != "" && (*udp != "" || *multicast != "") {
+		return fmt.Errorf("use --interface alone, or legacy --udp/--multicast-interface flags")
+	}
+	if *allowLAN && *udp == "" {
+		return fmt.Errorf("--allow-lan requires --udp")
+	}
+	if *multicast != "" && (!*allowLAN || *udp == "") {
+		return fmt.Errorf("--multicast-interface requires --udp and --allow-lan")
+	}
+	if *displayAddress != "" && (*plain || *demo || *image != "") {
+		return fmt.Errorf("--display cannot combine with --plain, --demo or --preview (SVG export)")
+	}
+	if !*offline && !*demo && *udp == "" {
+		address, iface, err := networkDefaults(*interfaceName)
+		if err != nil {
+			return err
+		}
+		*udp, *multicast, *allowLAN = address, iface, true
 	}
 	if *displayAddress != "" {
-		if *plain || *demo || *image != "" {
-			return fmt.Errorf("--display cannot combine with --plain, --demo or --preview (SVG export)")
-		}
 		return runDisplay(*displayAddress, *udp, *allowLAN, *multicast)
 	}
-	if *udp != "" && !*plain {
-		return fmt.Errorf("optional UDP requires --plain; the full-screen TUI is offline")
-	}
-	if *demo && *udp != "" {
-		return fmt.Errorf("demo cannot enable UDP")
-	}
+
 	s := model.New()
 	e := wire.New(s)
 	u := tui.UI{Store: s, Engine: e, Plain: *plain}
@@ -72,12 +96,12 @@ func run(args []string, in io.Reader, out io.Writer) error {
 	defer func() { stop(); udpWorker.Wait() }()
 	transportFailures := make(chan error, 1)
 	if *udp != "" {
-		server, err := wire.Listen(*udp, e)
+		server, err := listenTransport(*udp, e, *allowLAN, *multicast)
 		if err != nil {
 			return err
 		}
 		defer func() { stop(); server.Close() }()
-		fmt.Fprintf(out, "Explicit loopback UDP: %s (unicast only; notifications to active peers)\n", server.Address())
+		fmt.Fprintf(out, "UDP: %s (interface: %s)\n", server.Address(), *multicast)
 		udpWorker.Add(1)
 		go func() {
 			defer udpWorker.Done()
@@ -100,7 +124,15 @@ func run(args []string, in io.Reader, out io.Writer) error {
 		if err := preview(*image, s.Snapshot()); err != nil {
 			return err
 		}
-		return tui.NewDashboard(s, e, func(s model.Snapshot) error { return preview(*image, s) }).Run(ctx)
+		dashboard := tui.NewDashboard(s, e, func(s model.Snapshot) error { return preview(*image, s) })
+		dashboard.Network = *udp
+		err := dashboard.Run(ctx)
+		select {
+		case failure := <-transportFailures:
+			return failure
+		default:
+			return err
+		}
 	}
 	u.Draw(out)
 	if err := preview(*image, s.Snapshot()); err != nil {
@@ -180,7 +212,7 @@ func runDisplay(address, udpAddress string, allowLAN bool, multicastInterface st
 	page := &livepreview.Server{Store: store}
 	failures := make(chan error, 2)
 	if udpAddress != "" {
-		udp, err := wire.ListenConfigured(udpAddress, engine, allowLAN, multicastInterface)
+		udp, err := listenTransport(udpAddress, engine, allowLAN, multicastInterface)
 		if err != nil {
 			return err
 		}

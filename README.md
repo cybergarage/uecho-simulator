@@ -4,7 +4,7 @@ A small ECHONET Lite room simulator powered by [uecho-go](https://github.com/cyb
 
 ![Read-only browser display](docs/images/preview.png)
 
-The default mode is fully offline: requests are encoded, decoded and handled in memory. It opens no sockets, discovers no devices and sends no advertisements. The virtual profiles target ECHONET Lite v1.14 and Appendix Release R rev.4. See the supported properties and transport modes below; this is not a certified appliance or an implementation of the entire MRA.
+Normal startup enables IPv4 ECHONET UDP and multicast on one selected network interface. Use `--offline` to open no ECHONET sockets or advertisements. The virtual profiles target ECHONET Lite v1.14 and Appendix Release R rev.4. See the supported properties and transport modes below; this is not a certified appliance or an implementation of the entire MRA.
 
 ## Quick start
 
@@ -14,15 +14,14 @@ Install Go 1.25 or later and Make, then:
 git clone https://github.com/cybergarage/uecho-simulator.git
 cd uecho-simulator
 go mod download
-make help
-make tui
+make preview
 ```
 
 `make tui` starts the interactive full-screen UI. `make preview` keeps a read-only browser display running; `make export` generates room.svg and exits; `make demo` prints the evening scenario and exits. `make help` lists all five targets. Go commands use the pinned dependency with `GOWORK=off`. Generated room.svg is ignored by Git.
 
 ## Full-screen terminal UI
 
-The default command starts a selection-based [tview](https://github.com/rivo/tview)/[tcell](https://github.com/gdamore/tcell) dashboard. It shows devices, selected state/properties, available actions and an explicitly labelled offline simulated-event log. No command string is required for device operation.
+The default command starts a selection-based [tview](https://github.com/rivo/tview)/[tcell](https://github.com/gdamore/tcell) dashboard. It shows devices, selected state/properties, available actions and a simulated-event and UDP log. No command string is required for device operation.
 
 ![Selection dashboard](docs/images/tui.png)
 
@@ -68,31 +67,25 @@ The browser receives snapshots through Server-Sent Events when the shared model 
 
 This screenshot is from the actual local browser. The supplied visual reference could not be downloaded (Library returned HTTP 403); this design implements the requested bold English style without claiming to match that unseen image.
 
-### Explicit controller input
+### Controller input
 
-Preview starts with controller input disabled. To accept a controller on this machine, opt in to loopback unicast UDP:
+`make preview` and `make tui` enable UDP **3610** and join **224.0.23.0:3610** on one usable interface. A single interface is selected automatically. With several interfaces, startup shows their names and IPv4 addresses, focuses the first, and accepts Up/Down, Enter to start, or Esc to cancel. No interface means startup fails with an explanation. IPv6-only, loopback, down and non-multicast interfaces are excluded. When an interface has multiple IPv4 addresses, its sorted first address is used.
 
-```sh
-make preview PREVIEW_ARGS='--udp 127.0.0.1:3610'
-```
-
-For a later test from a separate LAN controller, first confirm the simulator's own local IPv4 address, that the interface belongs to the intended isolated/test network, that port 3610 is available, and that the controller supports manually addressed unicast for the listed EOJs. Replace `192.168.1.50` with that confirmed address:
+For unattended startup with several interfaces, select one explicitly:
 
 ```sh
-make preview PREVIEW_ARGS='--udp 192.168.1.50:3610 --allow-lan'
+make preview PREVIEW_ARGS='--interface en0'
 ```
 
-Only this explicit opt-in permits a local unicast LAN UDP bind. HTTP always remains loopback: open the browser on the simulator machine. Unicast mode can answer node-profile discovery addressed to its IP, but it does not join a multicast group. Responses go to the sender's IP at **UDP port 3610**, even when the request originates from a different port. A controller must therefore listen on 3610.
-
-To enable standard IPv4 multicast discovery on a deliberately selected test-network interface, add its actual interface name (for example `en0` on Mac or `eth0` on Linux):
+Headless startup never publishes on every interface. For an offline browser display:
 
 ```sh
-make preview PREVIEW_ARGS='--udp 192.168.1.50:3610 --allow-lan --multicast-interface en0'
+make preview PREVIEW_ARGS='--offline'
 ```
 
-The bind IP must belong to that interface, and the port must be 3610. This mode joins **224.0.23.0:3610**, answers incoming discovery, sends one D5 instance-list INF at startup, and broadcasts required status-change INF and successful INF_REQ results. It never scans or sends discovery requests to other devices. Incoming unicast and multicast requests use the same engine. Unknown EOJs receive no response; instance 00 is expanded to each matching concrete instance.
+HTTP stays at loopback; open the browser on the simulator machine. Networking answers incoming unicast and multicast requests, sends a D5 instance-list INF at startup, and sends required status-change INF and successful INF_REQ results to the group. It never sends discovery requests. Responses use the sender's IP at UDP port **3610**. Unknown EOJs receive no response; instance 00 expands to matching concrete instances.
 
-Without `--multicast-interface`, startup advertisements are disabled. Changes are delivered by unicast to up to 64 controller IPs that have made valid requests to known objects in the last five minutes; successful INF_REQ results return to the requester. This is an isolated/manual-controller mode, **not standard multicast discovery or broadcast delivery**. Notification queues preserve each transition; if a consumer falls behind their 256-entry bound, the UDP service stops with an error rather than silently discarding required announcements.
+Legacy `--udp 127.0.0.1:3610` remains unicast only. `--udp LOCAL_IP:3610 --allow-lan` selects LAN unicast only; adding `--multicast-interface NAME` joins the group on that interface. These options work in preview, TUI and plain mode. `--interface` replaces the three flags for normal multicast use. Offline/demo flags cannot combine with network flags. Notification queue overflow stops the transport with an error.
 
 SetC/SetI/SetGet update the shared model shown in the display; Get and INF_REQ read it. Sensor temperature remains read only over ECHONET. The temperature scenario emits sensor E0 and AC BB notifications. This work tested injected multicast paths and real localhost sockets only; Ubuntu CI additionally exercises OS multicast membership/startup/discovery on a dummy interface in an isolated network namespace. Physical interfaces, macOS multicast, household LAN and physical appliances have not been exercised.
 
@@ -110,10 +103,10 @@ make export
 `--plain` retains the earlier line interface for piped input, rather than opening a full-screen UI:
 
 ```sh
-printf 'light on\nac cool\ntemp 26.5\nquit\n' | go run ./cmd/uecho-simulator --plain
+printf 'light on\nac cool\ntemp 26.5\nquit\n' | go run ./cmd/uecho-simulator --offline --plain
 ```
 
-In-memory frames are labelled `SIM-RX`/`SIM-TX`; these are simulated events, not socket captures. The standard TUI is offline only. Optional unicast UDP is available through an explicit preview opt-in as above, or the legacy `--udp ... --plain` loopback mode.
+In-memory frames are labelled `SIM-RX`/`SIM-TX`; these are simulated events, not socket captures. TUI and plain mode use the same network selection as preview; `--offline` explicitly disables networking. Demo/export and `--help` need no network interface.
 
 ## Implemented profiles
 
@@ -145,13 +138,13 @@ Not implemented: IPv6 transport, every optional MRA property, appliance certific
 
 ## Optional loopback transport
 
-Networking is disabled unless explicitly requested:
+For manually addressed loopback unicast:
 
 ```sh
 go run ./cmd/uecho-simulator --udp 127.0.0.1:3610 --plain
 ```
 
-This plain mode accepts only a literal IPv4 loopback bind. Wildcard, multicast, hostname and LAN addresses are refused here; the preview mode has the separate explicit LAN/multicast options above. It does not scan or send startup advertisements. Responses and notifications target port 3610. UDP mode is excluded from `--demo`. The legacy plain interface redraws on local commands; use the browser preview for event-driven updates from UDP. Exit with `quit` or Ctrl-C.
+This legacy loopback mode accepts a literal IPv4 address. LAN and multicast use the common options above; wildcard and hostname binds are refused. It does not scan or send startup advertisements. Responses and notifications target port 3610. UDP mode is excluded from `--demo`. The legacy plain interface redraws on local commands; use the browser preview for event-driven updates from UDP. Exit with `quit` or Ctrl-C.
 
 ## Raspberry Pi 4/5
 
