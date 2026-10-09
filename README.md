@@ -186,16 +186,6 @@ CI sets `GOWORK=off` to check the pinned dependency rather than a local checkout
 ./scripts/check.sh
 ```
 
-<<<<<<< HEAD
 Checks include formatting, vet, tests/race (including tcell keyboard events, form apply/cancel, search targeting, resize and screen finalization), darwin/arm64 and linux/arm64 builds, and an offline SVG demo. Default checks use injected frames and deny network access. The separate opt-in `SIMULATOR_LOOPBACK_TEST=1 GOWORK=off go test -race ./internal/preview -run TestLoopbackControllerToDisplay` binds only 127.0.0.1 and verifies UDP request/response, model propagation, event delivery and shutdown. CI denies network access during checks after downloading dependencies, then runs the opt-in socket test in a separate Linux network namespace with only loopback enabled, plus IPv4 multicast integration on a dummy interface in another isolated namespace. Injected multicast tests cover startup, discovery, response addressing, notifications and shutdown without host sockets. The initial work-in-progress archive remains preserved separately; no source-library checkout was modified during migration.
 
 Release preparation, package reproducibility and verification limits are recorded in [docs/RELEASE.md](docs/RELEASE.md).
-
-BSD 3-Clause; see LICENSE.
-
-## UI references
-
-Navigation and visible key hints were informed by the official [k9s README](https://github.com/derailed/k9s) and [command guide](https://k9scli.io/topics/commands/). Widget composition follows the official [tview README](https://github.com/rivo/tview) and [form example](https://github.com/rivo/tview/blob/master/demos/form/main.go). No Kubernetes functionality or k9s code/assets are included. tview/tcell and transitive runtime versions are fixed in go.mod/go.sum; their licenses are available in the linked upstream repositories.
-=======
-Checks include formatting, vet, tests/race (including tcell keyboard events, form apply/cancel, search targeting, resize and screen finalization), darwin/arm64 and linux/arm64 builds, and an offline SVG demo. Default checks use injected frames and deny network access. The separate opt-in `SIMULATOR_LOOPBACK_TEST=1 GOWORK=off go test -race ./internal/preview -run TestLoopbackControllerToDisplay` binds only 127.0.0.1 and verifies UDP request/response, model propagation, event delivery and shutdown. CI denies network access during checks after downloading dependencies. The initial work-in-progress archive remains preserved separately; no source-library checkout was modified during migration.
->>>>>>> origin/main
