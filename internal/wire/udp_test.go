@@ -15,3 +15,17 @@ func TestAddressPolicy(t *testing.T) {
 	}
 	// Validation only: no socket is opened in tests.
 }
+
+func TestExplicitLANPolicy(t *testing.T) {
+	if err := ValidateExplicitAddress("192.168.1.2:3610", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateExplicitAddress("192.168.1.2:3610", false); err == nil {
+		t.Fatal("LAN needs opt-in")
+	}
+	for _, a := range []string{"0.0.0.0:3610", "224.0.23.0:3610", "255.255.255.255:3610", "localhost:3610", "[::1]:3610"} {
+		if ValidateExplicitAddress(a, true) == nil {
+			t.Fatal(a)
+		}
+	}
+}

@@ -11,4 +11,4 @@ GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o bin/uecho-simulator-darwin-ar
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o bin/uecho-simulator-linux-arm64 ./cmd/uecho-simulator
 make help
 make demo </dev/null
-make preview </dev/null
+make export </dev/null
