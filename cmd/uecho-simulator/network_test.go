@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"github.com/cybergarage/uecho-simulator/internal/wire"
+	"golang.org/x/term"
+	"os"
 	"strings"
 	"testing"
 
@@ -112,6 +114,26 @@ func TestDefaultPlainNetworkAndRollback(t *testing.T) {
 		return nil, fmt.Errorf("bind 3610: address already in use")
 	}
 	if err := run([]string{"--plain"}, strings.NewReader(""), &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "3610") {
+		t.Fatal(err)
+	}
+}
+
+func TestHeadlessMultipleAndNoInterfaces(t *testing.T) {
+	if term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
+		t.Skip("headless-only test")
+	}
+	original := discoverInterfaces
+	defer func() { discoverInterfaces = original }()
+	candidates := []networkInterface{{"sim0", []string{"192.0.2.10"}}, {"sim1", []string{"198.51.100.10"}}}
+	discoverInterfaces = func() ([]networkInterface, error) { return candidates, nil }
+	for _, args := range [][]string{{"--plain"}, {"--display", "127.0.0.1:8080"}, {}} {
+		err := run(args, strings.NewReader(""), &bytes.Buffer{})
+		if err == nil || !strings.Contains(err.Error(), "--interface NAME") || !strings.Contains(err.Error(), "192.0.2.10") {
+			t.Fatal(err)
+		}
+	}
+	candidates = nil
+	if err := run([]string{"--plain"}, strings.NewReader(""), &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "no usable") {
 		t.Fatal(err)
 	}
 }
