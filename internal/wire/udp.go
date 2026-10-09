@@ -118,6 +118,9 @@ func ListenConfigured(address string, engine *Engine, allowLAN bool, interfaceNa
 		if err != nil {
 			return nil, err
 		}
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagMulticast == 0 {
+			return nil, fmt.Errorf("interface %s must be up and multicast-capable", interfaceName)
+		}
 		addresses, err := iface.Addrs()
 		if err != nil {
 			return nil, err
@@ -133,6 +136,7 @@ func ListenConfigured(address string, engine *Engine, allowLAN bool, interfaceNa
 			return nil, fmt.Errorf("UDP bind address does not belong to interface %s", interfaceName)
 		}
 	}
+
 	conn, err := listenUDP(address, iface != nil)
 	if err != nil {
 		return nil, err
@@ -155,6 +159,10 @@ func ListenConfigured(address string, engine *Engine, allowLAN bool, interfaceNa
 			return nil, err
 		}
 		s.multicast = multicast
+		if err := scopeMulticast(multicast); err != nil {
+			s.Close()
+			return nil, err
+		}
 	}
 	return s, nil
 }

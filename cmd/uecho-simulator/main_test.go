@@ -22,7 +22,7 @@ func TestOfflineDemoAndInteractive(t *testing.T) {
 		t.Fatal("missing preview")
 	}
 	out.Reset()
-	if err := run([]string{"--plain"}, strings.NewReader("light on\nlight 101\nac heat\nevents\nquit\n"), &out); err != nil {
+	if err := run([]string{"--offline", "--plain"}, strings.NewReader("light on\nlight 101\nac heat\nevents\nquit\n"), &out); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "ERROR") || !strings.Contains(out.String(), "mode=heat") {

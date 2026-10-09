@@ -7,7 +7,7 @@ This document describes the proposed first release. It creates no tag or GitHub 
 - Three virtual device instances (general lighting, home AC, temperature sensor) and one node profile, based on ECHONET Lite v1.14 / Appendix Release R rev.4.
 - Mandatory properties for these constrained functions, accurate property maps, instance-list discovery and instance 00 handling.
 - Get, SetI, SetC, SetGet, INF_REQ, INFC reception, partial-error responses and required state-change INF.
-- UDP destination port 3610; explicit IPv4 multicast-interface mode; fully offline default and manual loopback mode.
+- UDP destination port 3610; IPv4 multicast on one selected interface by default; explicit offline/demo and legacy manual loopback modes.
 - Selection TUI, read-only event-driven browser display and 800×480 SVG export.
 - AC target range 0–50°C; undefined writes are rejected because automatic temperature control is not implemented.
 

@@ -15,6 +15,7 @@ import (
 
 // Dashboard owns widgets on the tview event loop. It has no socket or driver.
 type Dashboard struct {
+	Network                             string
 	app                                 *tview.Application
 	pages                               *tview.Pages
 	layout, body, right                 *tview.Flex
@@ -42,10 +43,10 @@ func NewDashboard(s *model.Store, e *wire.Engine, updated func(model.Snapshot) e
 	d.actions = tview.NewList().ShowSecondaryText(false)
 	d.actions.SetBorder(true).SetTitle(" Actions - Enter ")
 	d.logs = tview.NewTextView().SetDynamicColors(false).SetWrap(false).SetScrollable(true)
-	d.logs.SetBorder(true).SetTitle(" Offline simulated events - no socket traffic ")
+	d.logs.SetBorder(true).SetTitle(" Events - simulated frames and UDP ")
 	d.header = tview.NewTextView().SetDynamicColors(true)
 	d.help = tview.NewTextView().SetText("Tab/Shift-Tab focus | Arrows select | Enter act\n/ search | s scenario | ? help | q quit | Esc cancel")
-	d.status = tview.NewTextView().SetDynamicColors(true).SetText("[gray]Ready: offline virtual devices[-]")
+	d.status = tview.NewTextView().SetDynamicColors(true).SetText("[gray]Ready: virtual devices[-]")
 	d.search = tview.NewInputField().SetLabel(" / Search: ").SetFieldWidth(0)
 	d.search.SetChangedFunc(func(string) { d.refresh() })
 	d.search.SetDoneFunc(func(tcell.Key) { d.focus(d.table) })
@@ -114,7 +115,7 @@ func (d *Dashboard) resize(w, h int) {
 	if w < 45 || h < 18 {
 		d.status.SetText("[yellow]Use >=45x18; Tab/Enter/Esc still work[-]")
 	} else if wasSmall {
-		d.status.SetText("[gray]Terminal resized; ready offline[-]")
+		d.status.SetText("[gray]Terminal resized; ready[-]")
 	}
 }
 
@@ -176,7 +177,7 @@ func (d *Dashboard) capture(event *tcell.EventKey) *tcell.EventKey {
 			d.quit()
 			return nil
 		case '?':
-			d.message("Keyboard help", "Tab / Shift-Tab: cycle devices, actions, logs\nArrows: select or scroll; Enter: open / apply\n/: filter device name, EOJ or kind\nEsc: cancel dialog without changing state / clear filter\ns: evening scenario confirmation; q: quit confirmation\nForms: Tab to next field/button; Space toggles a checkbox.\nAll events are offline simulated frames. No LAN traffic.")
+			d.message("Keyboard help", "Tab / Shift-Tab: cycle devices, actions, logs\nArrows: select or scroll; Enter: open / apply\n/: filter device name, EOJ or kind\nEsc: cancel dialog without changing state / clear filter\ns: evening scenario confirmation; q: quit confirmation\nForms: Tab to next field/button; Space toggles a checkbox.\nSIM events are in-memory frames; UDP events are network traffic.")
 			return nil
 		}
 	}
@@ -215,7 +216,11 @@ func (d *Dashboard) refresh() {
 		d.selected = d.visible[row-1].EOJ
 		d.table.Select(row, 0)
 	}
-	d.header.SetText(fmt.Sprintf("[aqua] UECHO[-] | [green]OFFLINE / in-memory[-] | %.1f C | rev %d", float64(snap.AmbientTenths)/10, snap.Revision))
+	mode := "OFFLINE / in-memory"
+	if d.Network != "" {
+		mode = "NETWORK / " + d.Network
+	}
+	d.header.SetText(fmt.Sprintf("[aqua] UECHO[-] | [green]%s[-] | %.1f C | rev %d", mode, float64(snap.AmbientTenths)/10, snap.Revision))
 	var log strings.Builder
 	for _, event := range snap.Events {
 		fmt.Fprintf(&log, "%03d %s %-7s %-7s %s", event.Sequence, event.Time, event.Kind, event.Source, event.Message)
@@ -354,10 +359,10 @@ func (d *Dashboard) confirm(text string, apply func()) {
 	d.open(box, 58, 12)
 }
 func (d *Dashboard) scenario() {
-	d.confirm("Apply the evening scenario to virtual devices?\nLight 75%, AC cool / 24 C, ambient 26.5 C.\nNo real appliances or network traffic.", func() { u := UI{Store: d.store, Engine: d.engine}; d.result(u.Demo()) })
+	d.confirm("Apply the evening scenario to virtual devices?\nLight 75%, AC cool / 24 C, ambient 26.5 C.\nChanges apply to virtual devices; network mode sends notifications.", func() { u := UI{Store: d.store, Engine: d.engine}; d.result(u.Demo()) })
 }
 func (d *Dashboard) quit() {
-	d.confirm("Exit the offline simulator?\nVirtual state is not persisted.", d.app.Stop)
+	d.confirm("Exit the simulator?\nVirtual state is not persisted.", d.app.Stop)
 }
 func (d *Dashboard) edit() {
 	device, ok := d.device()
