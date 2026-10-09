@@ -52,6 +52,8 @@ type Snapshot struct {
 	AmbientTenths int      `json:"ambientTenths"`
 	Devices       []Device `json:"devices"`
 	Events        []Event  `json:"events"`
+	LastReceived  string   `json:"lastReceived"`
+	LastUpdated   string   `json:"lastUpdated"`
 }
 
 type deviceState struct {
@@ -66,6 +68,9 @@ type Store struct {
 	ambient            int
 	revision, sequence uint64
 	events             []Event
+	subscribers        map[chan struct{}]struct{}
+	lastReceived       string
+	lastUpdated        string
 }
 
 func New() *Store {
@@ -199,6 +204,18 @@ func (s *Store) InjectAmbient(tenths int, source string) error {
 }
 func (s *Store) logLocked(kind, source, message string, frame []byte) {
 	s.sequence++
+	if kind == "RX" {
+		s.lastReceived = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	if kind == "STATE" || kind == "INPUT" {
+		s.lastUpdated = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	for ch := range s.subscribers {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
 	s.events = append(s.events, Event{s.sequence, time.Now().Format("15:04:05"), kind, source, message, hex.EncodeToString(frame)})
 	if len(s.events) > 100 {
 		s.events = slices.Clone(s.events[len(s.events)-100:])
@@ -212,7 +229,7 @@ func (s *Store) Log(kind, source, message string, frame []byte) {
 func (s *Store) Snapshot() Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	snap := Snapshot{Revision: s.revision, Room: "Living room", AmbientTenths: s.ambient, Events: slices.Clone(s.events)}
+	snap := Snapshot{Revision: s.revision, Room: "Living room", AmbientTenths: s.ambient, Events: slices.Clone(s.events), LastReceived: s.lastReceived, LastUpdated: s.lastUpdated}
 	for _, eoj := range []uint32{Light, Aircon, Sensor} {
 		d := s.devices[eoj]
 		v := Device{EOJ: eoj, Name: d.name, Kind: d.kind, Power: d.data[0x80][0] == 0x30}
@@ -231,4 +248,18 @@ func (s *Store) Snapshot() Snapshot {
 		snap.Devices = append(snap.Devices, v)
 	}
 	return snap
+}
+
+// Subscribe coalesces notifications; consumers read the latest detached snapshot.
+// Register before reading an initial snapshot to avoid missing concurrent writes.
+func (s *Store) Subscribe() (<-chan struct{}, func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.subscribers == nil {
+		s.subscribers = make(map[chan struct{}]struct{})
+	}
+	ch := make(chan struct{}, 1)
+	s.subscribers[ch] = struct{}{}
+	var once sync.Once
+	return ch, func() { once.Do(func() { s.mu.Lock(); defer s.mu.Unlock(); delete(s.subscribers, ch); close(ch) }) }
 }

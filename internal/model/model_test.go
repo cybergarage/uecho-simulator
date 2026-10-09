@@ -70,3 +70,27 @@ func TestConcurrentStateAndBoundedEvents(t *testing.T) {
 		}
 	}
 }
+
+func TestSubscriptionsCoalesceAndUnsubscribe(t *testing.T) {
+	store := New()
+	changes, unsubscribe := store.Subscribe()
+	for i := 0; i < 200; i++ {
+		store.Log("DISPLAY", "test", "refresh", nil)
+	}
+	select {
+	case <-changes:
+	default:
+		t.Fatal("lost change")
+	}
+	select {
+	case <-changes:
+		t.Fatal("notifications not coalesced")
+	default:
+	}
+	unsubscribe()
+	unsubscribe()
+	store.Log("DISPLAY", "test", "after unsubscribe", nil)
+	if _, ok := <-changes; ok {
+		t.Fatal("subscription not closed")
+	}
+}

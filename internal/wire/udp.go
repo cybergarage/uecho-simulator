@@ -26,7 +26,12 @@ type UDP struct {
 }
 
 func Listen(address string, engine *Engine) (*UDP, error) {
-	if err := ValidateAddress(address); err != nil {
+	return ListenExplicit(address, engine, false)
+}
+
+// ListenExplicit permits LAN unicast only after the caller explicitly opts in.
+func ListenExplicit(address string, engine *Engine, allowLAN bool) (*UDP, error) {
+	if err := ValidateExplicitAddress(address, allowLAN); err != nil {
 		return nil, err
 	}
 	a, err := net.ResolveUDPAddr("udp4", address)
@@ -71,4 +76,18 @@ func (s *UDP) Serve(ctx context.Context) error {
 			return err
 		}
 	}
+}
+
+func ValidateExplicitAddress(address string, allowLAN bool) error {
+	if !allowLAN {
+		return ValidateAddress(address)
+	}
+	a, err := netip.ParseAddrPort(address)
+	if err != nil {
+		return fmt.Errorf("use a literal local IPv4:port: %w", err)
+	}
+	if !a.Addr().Is4() || a.Addr().IsUnspecified() || a.Addr().IsMulticast() || a.Addr() == netip.MustParseAddr("255.255.255.255") {
+		return fmt.Errorf("explicit UDP requires a local unicast IPv4 address")
+	}
+	return nil
 }

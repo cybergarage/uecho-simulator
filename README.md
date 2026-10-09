@@ -6,18 +6,58 @@ The default mode is fully offline: requests are encoded, decoded and handled in 
 
 ## Quick start
 
-Install Go 1.25 or later, then:
+Install Go 1.25 or later and Make, then:
 
 ```sh
 git clone git@github.com:cybergarage/uecho-simulator.git
 cd uecho-simulator
-git switch feat/fullscreen-tui # current draft UI branch
 go mod download
-go run ./cmd/uecho-simulator --demo --plain --preview room.svg
-go run ./cmd/uecho-simulator --preview room.svg
+make help
+make tui
 ```
 
-Open room.svg in a browser or image viewer. It is a static 800×480 black/white room and state view. The SVG file updates after local terminal commands; reload the viewer to see the latest state. No web server or hardware refresh loop is included.
+`make tui` starts the interactive full-screen UI. `make preview` keeps a read-only browser display running; `make export` generates room.svg and exits; `make demo` prints the evening scenario and exits. `make help` lists all five targets. Go commands use the pinned dependency with `GOWORK=off`. Generated room.svg is ignored by Git.
+
+## Read-only browser preview
+
+```sh
+make preview
+```
+
+Open **http://127.0.0.1:8080/** in a browser on the same Mac or Pi. The bold English display is designed for 800×480 and has no device controls. It shows initial simulated values until controller input arrives. Preview stays running even without incoming events; it does not read line commands or exit at stdin EOF. A real terminal is required for its keys.
+
+These keys work in the **launching terminal**, not the browser:
+
+| Key | Action |
+| --- | --- |
+| `q` / Ctrl-C | Stop HTTP/UDP, close streams and restore terminal mode |
+| `?` | Show key help |
+| `r` | Re-send the current model to all displays without changing devices |
+| `s` | Save the current state as room.svg using the existing static scene adapter |
+
+The browser receives snapshots through Server-Sent Events when the shared model changes, rather than polling. Reconnecting displays immediately receive the latest state. `DISPLAY DISCONNECTED` retains last values while reconnecting. `DISPLAY LIVE` describes the browser stream, **not controller connectivity**. UDP is connectionless: the display reports whether a frame has arrived and the last RX time; it never claims a controller is connected. The state timestamp changes only on a state mutation. Read requests and invalid frames can update RX without changing state. No artificial temperature evolution runs.
+
+![Read-only browser display](docs/images/preview.png)
+
+This screenshot is from the actual local browser. The supplied visual reference could not be downloaded (Library returned HTTP 403); this design implements the requested bold English style without claiming to match that unseen image.
+
+### Explicit controller input
+
+Preview starts with controller input disabled. To accept a controller on this machine, opt in to loopback unicast UDP:
+
+```sh
+make preview PREVIEW_ARGS='--udp 127.0.0.1:3610'
+```
+
+For a later test from a separate LAN controller, first confirm the simulator's own local IPv4 address, that the interface belongs to the intended isolated/test network, that port 3610 is available, and that the controller supports manually addressed unicast Get/SetC for the listed EOJs. Replace `192.168.1.50` with that confirmed address:
+
+```sh
+make preview PREVIEW_ARGS='--udp 192.168.1.50:3610 --allow-lan'
+```
+
+Only this explicit opt-in permits a local unicast LAN UDP bind. HTTP always remains loopback: open the browser on the simulator machine. There is no discovery, multicast membership, advertisement, INF or node-profile service; discovery-dependent controllers will not find this prototype. SetC updates the same model shown in the display; Get reads it. Sensor temperature remains read only. This task tested loopback and injected events only, not household LAN or physical devices.
+
+A browser has no mutation or shutdown endpoint. The LAN UDP prototype has no authentication, so use only the intended test network and stop it from the launching terminal afterward. No firewall or permissions are changed by the program.
 
 ## Full-screen terminal UI
 
@@ -49,7 +89,8 @@ At widths below 85 columns or heights below 26 rows, the UI stacks Devices and A
 The offline demo and SVG export remain available for automation:
 
 ```sh
-go run ./cmd/uecho-simulator --demo --plain --preview room.svg
+make demo
+make export
 ```
 
 `--plain` retains the earlier line interface for piped input, rather than opening a full-screen UI:
@@ -58,7 +99,7 @@ go run ./cmd/uecho-simulator --demo --plain --preview room.svg
 printf 'light on\nac cool\ntemp 26.5\nquit\n' | go run ./cmd/uecho-simulator --plain
 ```
 
-In-memory frames are labelled `SIM-RX`/`SIM-TX`; these are simulated events, not socket captures. The standard TUI is offline only. Optional loopback UDP is available exclusively through explicit `--udp ... --plain`; it has not been exercised in this work.
+In-memory frames are labelled `SIM-RX`/`SIM-TX`; these are simulated events, not socket captures. The standard TUI is offline only. Optional unicast UDP is available through an explicit preview opt-in as above, or the legacy `--udp ... --plain` loopback mode.
 
 ## Implemented profiles
 
@@ -70,7 +111,7 @@ In-memory frames are labelled `SIM-RX`/`SIM-TX`; these are simulated events, not
 
 Common EPCs: 80 operation status, 88 fault status, 8A experimental manufacturer value FFFFFF, 9D empty announcement map, 9E Set map, 9F Get map. Maps describe only implemented properties and currently fit Format 1. No full MRA object/property set is inherited. Get and SetC are supported, including error responses and multiple-property frames. Rejected individual writes do not change their state; a multi-property request may apply valid writes before returning an error for another property.
 
-Not implemented: node profile/discovery, INF notifications, SetI/SetGet, complete MRA conformance, device persistence, live web UI, physical appliances, Sense HAT/e-paper drivers or automatic display refresh. The sensor always reports powered on and cannot be written over the protocol.
+Not implemented: node profile/discovery, INF notifications, SetI/SetGet, complete MRA conformance, device persistence, physical appliances, Sense HAT/e-paper drivers. The sensor always reports powered on and cannot be written over the protocol.
 
 ## Optional loopback transport
 
@@ -80,7 +121,7 @@ Networking is disabled unless explicitly requested:
 go run ./cmd/uecho-simulator --udp 127.0.0.1:3610 --plain
 ```
 
-This prototype accepts only a literal IPv4 loopback bind. Wildcard, multicast, hostname and LAN addresses are refused. It responds only to received requests and does not scan or advertise. UDP mode is excluded from `--demo`. The optional transport has address-policy tests; actual socket interaction has not been exercised in this task. UDP state changes appear at the next terminal redraw; they do not trigger automatic preview refresh. Exit with `quit` or Ctrl-C.
+This prototype accepts only a literal IPv4 loopback bind. Wildcard, multicast, hostname and LAN addresses are refused. It responds only to received requests and does not scan or advertise. UDP mode is excluded from `--demo`. The legacy plain interface redraws on local commands; use the browser preview for event-driven updates from UDP. Exit with `quit` or Ctrl-C.
 
 ## Raspberry Pi 4/5
 
@@ -100,6 +141,7 @@ After transferring it through your existing authorized workflow, run `./uecho-si
 - `internal/model`: synchronized virtual state and detached snapshots; no network or hardware.
 - `internal/wire`: uecho-go frame handling plus optional transport.
 - `internal/tui`: full-screen selection UI, legacy plain interface and deterministic scenario.
+- `internal/preview`: read-only loopback HTTP/SSE display and terminal lifecycle keys.
 - `internal/display`: `Adapter.Render(snapshot) -> Frame`; SVG is the initial adapter. Future Sense HAT rev2/e-paper adapters own pixel conversion, refresh intervals and batching without changing model/protocol code.
 - `cmd/uecho-simulator`: explicit runtime modes and lifecycle.
 
@@ -116,7 +158,7 @@ CI sets `GOWORK=off` to check the pinned dependency rather than a local checkout
 ./scripts/check.sh
 ```
 
-Checks include formatting, vet, tests/race (including tcell keyboard events, form apply/cancel, search targeting, resize and screen finalization), darwin/arm64 and linux/arm64 builds, and an offline SVG demo. Tests use in-memory frames and never call the UDP listener. CI denies network access during checks after downloading dependencies. The initial work-in-progress archive remains preserved separately; no source-library checkout was modified during migration.
+Checks include formatting, vet, tests/race (including tcell keyboard events, form apply/cancel, search targeting, resize and screen finalization), darwin/arm64 and linux/arm64 builds, and an offline SVG demo. Default checks use injected frames and deny network access. The separate opt-in `SIMULATOR_LOOPBACK_TEST=1 GOWORK=off go test -race ./internal/preview -run TestLoopbackControllerToDisplay` binds only 127.0.0.1 and verifies UDP request/response, model propagation, event delivery and shutdown. CI denies network access during checks after downloading dependencies. The initial work-in-progress archive remains preserved separately; no source-library checkout was modified during migration.
 
 BSD 3-Clause; see LICENSE and THIRD_PARTY_NOTICES.md.
 
