@@ -18,6 +18,31 @@ make tui
 
 `make tui` starts the interactive full-screen UI. `make preview` keeps a read-only browser display running; `make export` generates room.svg and exits; `make demo` prints the evening scenario and exits. `make help` lists all five targets. Go commands use the pinned dependency with `GOWORK=off`. Generated room.svg is ignored by Git.
 
+## Full-screen terminal UI
+
+The default command starts a selection-based [tview](https://github.com/rivo/tview)/[tcell](https://github.com/gdamore/tcell) dashboard. It shows devices, selected state/properties, available actions and an explicitly labelled offline simulated-event log. No command string is required for device operation.
+
+![Selection dashboard](docs/images/tui.png)
+
+[Device form](docs/images/tui-form.png) · [Compact layout](docs/images/tui-compact.png). These images come from real tcell widget drawing in the simulation-screen tests, rather than a visual mockup.
+
+| Key | Action |
+| --- | --- |
+| Tab / Shift-Tab | Cycle Devices → Actions → Events; cyan border marks focus |
+| Up / Down | Select a device/action or scroll events |
+| Enter | From Devices, focus Actions; from Actions, open a form/menu |
+| `/` | Search device name, kind or EOJ; Enter returns to Devices |
+| Esc | Cancel a dialog without applying; outside dialogs clear search / focus Devices |
+| `s` | Open evening-scenario confirmation (Cancel is selected first) |
+| `?` | Open keyboard help (arrows scroll; Tab reaches Close) |
+| `q` / Ctrl-C | Open quit confirmation; Esc cancels it |
+
+In forms, Tab/Shift-Tab moves between fields and buttons, Space toggles Power, and Enter opens/selects a mode dropdown or activates Apply/Cancel. Brightness and AC target use numeric fields. Temperature sensor EPC E0 remains read only: its form changes a **local ambient scenario input**, not a protocol write. Input validation happens before any state mutation.
+
+`demo` applies the deterministic evening scenario: light on at 75%, air conditioner on in cool mode at 24°C, room temperature 26.5°C. Use `s` and confirm it in the TUI, or use `--demo` for a non-interactive run. Temperature is injected; no thermodynamic model runs in the background.
+
+At widths below 85 columns or heights below 26 rows, the UI stacks Devices and Actions and reduces the log pane. The wide property pane is available through **View state / supported properties**. Selection and open forms survive resize; dialogs are constrained to terminal bounds. Use at least 45×18 (85×26 or larger recommended). Smaller screens remain cancellable but may clip content. Mouse navigation is currently disabled. Exit through the confirmation dialog; tcell restores the terminal's normal screen/input mode.
+
 ## Read-only browser preview
 
 ```sh
@@ -58,31 +83,6 @@ make preview PREVIEW_ARGS='--udp 192.168.1.50:3610 --allow-lan'
 Only this explicit opt-in permits a local unicast LAN UDP bind. HTTP always remains loopback: open the browser on the simulator machine. There is no discovery, multicast membership, advertisement, INF or node-profile service; discovery-dependent controllers will not find this prototype. SetC updates the same model shown in the display; Get reads it. Sensor temperature remains read only. This task tested loopback and injected events only, not household LAN or physical devices.
 
 A browser has no mutation or shutdown endpoint. The LAN UDP prototype has no authentication, so use only the intended test network and stop it from the launching terminal afterward. No firewall or permissions are changed by the program.
-
-## Full-screen terminal UI
-
-The default command starts a selection-based [tview](https://github.com/rivo/tview)/[tcell](https://github.com/gdamore/tcell) dashboard. It shows devices, selected state/properties, available actions and an explicitly labelled offline simulated-event log. No command string is required for device operation.
-
-![Selection dashboard](docs/images/tui.png)
-
-[Device form](docs/images/tui-form.png) · [Compact layout](docs/images/tui-compact.png). These images come from real tcell widget drawing in the simulation-screen tests, rather than a visual mockup.
-
-| Key | Action |
-| --- | --- |
-| Tab / Shift-Tab | Cycle Devices → Actions → Events; cyan border marks focus |
-| Up / Down | Select a device/action or scroll events |
-| Enter | From Devices, focus Actions; from Actions, open a form/menu |
-| `/` | Search device name, kind or EOJ; Enter returns to Devices |
-| Esc | Cancel a dialog without applying; outside dialogs clear search / focus Devices |
-| `s` | Open evening-scenario confirmation (Cancel is selected first) |
-| `?` | Open keyboard help (arrows scroll; Tab reaches Close) |
-| `q` / Ctrl-C | Open quit confirmation; Esc cancels it |
-
-In forms, Tab/Shift-Tab moves between fields and buttons, Space toggles Power, and Enter opens/selects a mode dropdown or activates Apply/Cancel. Brightness and AC target use numeric fields. Temperature sensor EPC E0 remains read only: its form changes a **local ambient scenario input**, not a protocol write. Input validation happens before any state mutation.
-
-`demo` applies the deterministic evening scenario: light on at 75%, air conditioner on in cool mode at 24°C, room temperature 26.5°C. Use `s` and confirm it in the TUI, or use `--demo` for a non-interactive run. Temperature is injected; no thermodynamic model runs in the background.
-
-At widths below 85 columns or heights below 26 rows, the UI stacks Devices and Actions and reduces the log pane. The wide property pane is available through **View state / supported properties**. Selection and open forms survive resize; dialogs are constrained to terminal bounds. Use at least 45×18 (85×26 or larger recommended). Smaller screens remain cancellable but may clip content. Mouse navigation is currently disabled. Exit through the confirmation dialog; tcell restores the terminal's normal screen/input mode.
 
 ## Non-interactive / plain mode
 
@@ -159,9 +159,3 @@ CI sets `GOWORK=off` to check the pinned dependency rather than a local checkout
 ```
 
 Checks include formatting, vet, tests/race (including tcell keyboard events, form apply/cancel, search targeting, resize and screen finalization), darwin/arm64 and linux/arm64 builds, and an offline SVG demo. Default checks use injected frames and deny network access. The separate opt-in `SIMULATOR_LOOPBACK_TEST=1 GOWORK=off go test -race ./internal/preview -run TestLoopbackControllerToDisplay` binds only 127.0.0.1 and verifies UDP request/response, model propagation, event delivery and shutdown. CI denies network access during checks after downloading dependencies. The initial work-in-progress archive remains preserved separately; no source-library checkout was modified during migration.
-
-BSD 3-Clause; see LICENSE and THIRD_PARTY_NOTICES.md.
-
-## UI references
-
-Navigation and visible key hints were informed by the official [k9s README](https://github.com/derailed/k9s) and [command guide](https://k9scli.io/topics/commands/). Widget composition follows the official [tview README](https://github.com/rivo/tview) and [form example](https://github.com/rivo/tview/blob/master/demos/form/main.go). No Kubernetes functionality or k9s code/assets are included. tview/tcell and transitive runtime versions are fixed in go.mod/go.sum; their upstream notices are in THIRD_PARTY_NOTICES.md.
