@@ -28,3 +28,24 @@ jobs:
       - name: Check without network (Mac)
         if: runner.os == 'macOS'
         run: sandbox-exec -p '(version 1)(allow default)(deny network*)' ./scripts/check.sh
+      - name: Controller and display in isolated loopback namespace (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo unshare --net sh -c '
+            set -eu
+            ip link set lo up
+            exec env PATH="$1" GOCACHE="$2" GOMODCACHE="$3" GOWORK=off GOPROXY=off GOTOOLCHAIN=local SIMULATOR_LOOPBACK_TEST=1 go test -race -count=1 ./internal/preview -run TestLoopbackControllerToDisplay
+          ' sh "$PATH" "$(go env GOCACHE)" "$(go env GOMODCACHE)"
+      - name: IPv4 multicast device in isolated namespace (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo unshare --net sh -c '
+            set -eu
+            ip link set lo up
+            ip link add simtest0 type dummy
+            ip addr add 192.0.2.10/24 dev simtest0
+            ip addr add 192.0.2.20/24 dev simtest0
+            ip link set simtest0 up multicast on
+            ip route add 224.0.23.0/32 dev simtest0
+            exec env PATH="$1" GOCACHE="$2" GOMODCACHE="$3" GOWORK=off GOPROXY=off GOTOOLCHAIN=local SIMULATOR_ISOLATED_MULTICAST_TEST=1 go test -race -count=1 ./internal/wire -run TestIsolatedIPv4Multicast -v
+          ' sh "$PATH" "$(go env GOCACHE)" "$(go env GOMODCACHE)"

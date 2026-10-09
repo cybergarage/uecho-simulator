@@ -60,21 +60,31 @@ func TestLoopbackControllerToDisplay(t *testing.T) {
 	if next().Revision != 1 {
 		t.Fatal("initial")
 	}
+	receiver, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: wire.Port})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer receiver.Close()
 	conn, err := net.Dial("udp4", udp.Address())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+	_ = receiver.SetDeadline(time.Now().Add(2 * time.Second))
 	for _, level := range []byte{15, 85} {
 		frame := []byte{0x10, 0x81, 0, 1, 5, 0xff, 1, 2, 0x90, 1, 0x61, 1, 0xb0, 1, level}
 		if _, err := conn.Write(frame); err != nil {
 			t.Fatal(err)
 		}
 		b := make([]byte, 1024)
-		n, err := conn.Read(b)
-		if err != nil || n < 12 || b[10] != 0x71 {
-			t.Fatal("SetC response", n, err)
+		for {
+			n, _, err := receiver.ReadFromUDP(b)
+			if err != nil {
+				t.Fatal("SetC response", n, err)
+			}
+			if n >= 12 && b[10] == 0x71 {
+				break
+			}
 		}
 		for {
 			s := next()

@@ -29,12 +29,12 @@ func (u *UI) Draw(out io.Writer) {
 		case "light":
 			fmt.Fprintf(out, "LIGHT  on=%t brightness=%d%%\n", d.Power, d.Level)
 		case "aircon":
-			fmt.Fprintf(out, "AIRCON on=%t mode=%s target=%d C\n", d.Power, d.Mode, d.Target)
+			fmt.Fprintf(out, "AIRCON on=%t mode=%s target=%s\n", d.Power, d.Mode, d.TargetLabel())
 		case "sensor":
 			fmt.Fprintf(out, "SENSOR %.1f C (read only)\n", float64(s.AmbientTenths)/10)
 		}
 	}
-	fmt.Fprintln(out, "Commands: light on|off|0..100; ac on|off|cool|heat|fan|16..30; temp -20..50; events; demo; help; quit")
+	fmt.Fprintln(out, "Commands: light on|off|0..100; ac on|off|cool|heat|fan|auto|dry|other|0..50; temp -20..50; events; demo; help; quit")
 }
 func (u *UI) Command(line string, out io.Writer) (bool, error) {
 	p := strings.Fields(line)
@@ -80,12 +80,12 @@ func (u *UI) Command(line string, out io.Writer) (bool, error) {
 		case "off":
 			epc = 0x80
 			value = 0x31
-		case "cool", "heat", "fan":
+		case "cool", "heat", "fan", "auto", "dry", "other":
 			if eoj != model.Aircon {
 				return false, fmt.Errorf("light has no mode")
 			}
 			epc = 0xB0
-			value = map[string]byte{"cool": 0x42, "heat": 0x43, "fan": 0x45}[p[1]]
+			value = map[string]byte{"other": 0x40, "auto": 0x41, "cool": 0x42, "heat": 0x43, "dry": 0x44, "fan": 0x45}[p[1]]
 		default:
 			n, err := strconv.Atoi(p[1])
 			if err != nil || n < 0 || n > 255 {

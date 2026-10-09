@@ -92,7 +92,7 @@ func TestRequestAndPropertyMaps(t *testing.T) {
 	}
 }
 func FuzzHandle(f *testing.F) {
-	for _, b := range [][]byte{{}, {0x10, 0x81}, {0x10, 0x81, 0, 1, 5, 255, 1, 2, 144, 1, 0x62, 1, 0x80, 0}} {
+	for _, b := range [][]byte{{}, {0x10, 0x81}, {0x10, 0x81, 0, 1, 5, 255, 1, 2, 144, 1, 0x62, 1, 0x80, 0}, {0x10, 0x81, 0, 1, 5, 255, 1, 2, 144, 1, 0x6e, 1, 0x80, 1, 0x30, 1, 0x80, 0}, {0x10, 0x81, 0, 1, 5, 255, 1, 14, 240, 1, 0x74, 1, 0xee, 1, 0x30}} {
 		f.Add(b)
 	}
 	f.Fuzz(func(t *testing.T, b []byte) {

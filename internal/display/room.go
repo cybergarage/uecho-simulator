@@ -35,7 +35,7 @@ func RoomSVG(s model.Snapshot) []byte {
 		case "aircon":
 			b.WriteString(`<rect x="330" y="92" width="130" height="42" rx="6" fill="white" stroke="black" stroke-width="2"/><path d="M345 122h100" stroke="black"/>`)
 			text(331, 157, 14, "AC "+power)
-			text(331, 178, 13, fmt.Sprintf("%s / %d C", d.Mode, d.Target))
+			text(331, 178, 13, fmt.Sprintf("%s / %s", d.Mode, d.TargetLabel()))
 		}
 	}
 	b.WriteString(`<rect x="45" y="92" width="88" height="80" rx="5" fill="white" stroke="black" stroke-width="2"/>`)
@@ -50,7 +50,7 @@ func RoomSVG(s model.Snapshot) []byte {
 		case "light":
 			text(520, y+42, 14, fmt.Sprintf("on=%t / %d%%", d.Power, d.Level))
 		case "aircon":
-			text(520, y+42, 14, fmt.Sprintf("on=%t %s %d C", d.Power, d.Mode, d.Target))
+			text(520, y+42, 14, fmt.Sprintf("on=%t %s %s", d.Power, d.Mode, d.TargetLabel()))
 		case "sensor":
 			text(520, y+42, 14, fmt.Sprintf("%.1f C / GET only", float64(s.AmbientTenths)/10))
 		}

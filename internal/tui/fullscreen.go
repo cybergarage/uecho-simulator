@@ -249,7 +249,7 @@ func (d *Dashboard) refreshDetails() {
 	case "light":
 		fmt.Fprintf(&b, "Power %t | Brightness %d%%\n", device.Power, device.Level)
 	case "aircon":
-		fmt.Fprintf(&b, "Power %t | %s | Target %d C\n", device.Power, device.Mode, device.Target)
+		fmt.Fprintf(&b, "Power %t | %s | Target %s\n", device.Power, device.Mode, device.TargetLabel())
 	case "sensor":
 		fmt.Fprintln(&b, "E0 is read only; ambient is a local scenario input.")
 	}
@@ -376,14 +376,15 @@ func (d *Dashboard) edit() {
 	case "light":
 		form.AddInputField("Brightness 0..100", strconv.Itoa(device.Level), 8, tview.InputFieldInteger, nil)
 	case "aircon":
-		options := []string{"cool", "heat", "fan"}
+		options := []string{"cool", "heat", "fan", "auto", "dry", "other"}
 		index := 0
 		for i, v := range options {
 			if v == mode {
 				index = i
 			}
 		}
-		form.AddDropDown("Mode", options, index, func(v string, _ int) { mode = v }).AddInputField("Target 16..30 C", strconv.Itoa(device.Target), 8, tview.InputFieldInteger, nil)
+		target := strconv.Itoa(device.Target)
+		form.AddDropDown("Mode", options, index, func(v string, _ int) { mode = v }).AddInputField("Target 0..50 C", target, 8, tview.InputFieldInteger, nil)
 	case "sensor":
 		form.AddTextView("Read only", "E0 cannot be written. This edits local ambient input.", 44, 2, false, false).AddInputField("Ambient -20..50 C", fmt.Sprintf("%.1f", float64(d.store.Snapshot().AmbientTenths)/10), 10, tview.InputFieldFloat, nil)
 	}
@@ -401,8 +402,8 @@ func (d *Dashboard) edit() {
 				return
 			}
 		case "aircon":
-			if value < 16 || value > 30 || value != math.Trunc(value) {
-				d.status.SetText("[red]Target must be an integer 16..30[-]")
+			if value < 0 || value > 50 || value != math.Trunc(value) {
+				d.status.SetText("[red]Target must be an integer 0..50[-]")
 				return
 			}
 		case "sensor":
@@ -432,7 +433,7 @@ func (d *Dashboard) edit() {
 			d.result(write(0xB0, byte(value)))
 			return
 		}
-		if err := write(0xB0, map[string]byte{"cool": 0x42, "heat": 0x43, "fan": 0x45}[mode]); err != nil {
+		if err := write(0xB0, map[string]byte{"other": 0x40, "auto": 0x41, "cool": 0x42, "heat": 0x43, "dry": 0x44, "fan": 0x45}[mode]); err != nil {
 			d.result(err)
 			return
 		}

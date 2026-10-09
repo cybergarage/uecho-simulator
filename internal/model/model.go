@@ -12,17 +12,19 @@ import (
 )
 
 const (
+	Node   uint32 = 0x0EF001
 	Light  uint32 = 0x029001
 	Aircon uint32 = 0x013001
 	Sensor uint32 = 0x001101
 )
 
-// Definition is the implemented subset, not a claim of complete MRA compliance.
+// Definition declares the implemented property access and announcement behavior.
 type Definition struct {
 	EPC      byte   `json:"epc"`
 	Name     string `json:"name"`
 	Writable bool   `json:"writable"`
 	Value    string `json:"value"`
+	Announce bool   `json:"announce"`
 }
 
 type Device struct {
@@ -34,6 +36,14 @@ type Device struct {
 	Mode       string       `json:"mode"`
 	Target     int          `json:"target"`
 	Properties []Definition `json:"properties"`
+}
+
+// TargetLabel preserves the protocol's undefined setpoint sentinel in every UI.
+func (d Device) TargetLabel() string {
+	if d.Target == 0xfd {
+		return "UNDEFINED"
+	}
+	return fmt.Sprintf("%d C", d.Target)
 }
 
 type Event struct {
@@ -71,35 +81,10 @@ type Store struct {
 	subscribers        map[chan struct{}]struct{}
 	lastReceived       string
 	lastUpdated        string
+	notifications      map[chan Change]struct{}
 }
 
-func New() *Store {
-	s := &Store{devices: make(map[uint32]*deviceState), ambient: 220, revision: 1}
-	for _, d := range []struct {
-		eoj        uint32
-		name, kind string
-	}{
-		{Light, "Ceiling light", "light"}, {Aircon, "Air conditioner", "aircon"}, {Sensor, "Temperature sensor", "sensor"},
-	} {
-		defs := []Definition{{0x80, "Operation status", d.eoj != Sensor, ""}, {0x88, "Fault status", false, ""}, {0x8A, "Experimental manufacturer", false, ""}, {0x9D, "Announcement map (empty)", false, ""}, {0x9E, "Set map", false, ""}, {0x9F, "Get map", false, ""}}
-		data := map[byte][]byte{0x80: {0x31}, 0x88: {0x42}, 0x8A: {0xFF, 0xFF, 0xFF}}
-		switch d.eoj {
-		case Light:
-			defs = append(defs, Definition{0xB0, "Brightness (%)", true, ""})
-			data[0xB0] = []byte{60}
-		case Aircon:
-			defs = append(defs, Definition{0xB0, "Mode (cool/heat/fan)", true, ""}, Definition{0xB3, "Setpoint (16..30 C)", true, ""}, Definition{0xBB, "Room temperature (signed C)", false, ""})
-			data[0xB0] = []byte{0x42}
-			data[0xB3] = []byte{24}
-		case Sensor:
-			defs = append(defs, Definition{0xE0, "Temperature (signed 0.1 C)", false, ""})
-			data[0x80] = []byte{0x30}
-		}
-		s.devices[d.eoj] = &deviceState{d.name, d.kind, defs, data}
-	}
-	s.logLocked("INFO", "system", "DEMO: in-memory frames; no network or hardware", nil)
-	return s
-}
+func New() *Store { return newProfiles() }
 
 func (s *Store) definition(eoj uint32, epc byte) (*deviceState, Definition, error) {
 	d, ok := s.devices[eoj]
@@ -120,21 +105,16 @@ func (s *Store) valueLocked(eoj uint32, epc byte) ([]byte, error) {
 		return nil, err
 	}
 	switch epc {
-	case 0x9D:
-		return []byte{0}, nil // No notification service is implemented.
-	case 0x9E, 0x9F:
+	case 0x9D, 0x9E, 0x9F:
 		codes := []byte{}
 		for _, def := range d.definitions {
-			if epc == 0x9F || def.Writable {
+			if epc == 0x9F || epc == 0x9E && def.Writable || epc == 0x9D && def.Announce {
 				codes = append(codes, def.EPC)
 			}
 		}
 		slices.Sort(codes)
-		// Current explicit profiles all fit Format 1. Never inherit the full MRA.
-		if len(codes) >= 16 {
-			return nil, fmt.Errorf("prototype profile exceeds Format 1 limit")
-		}
-		return append([]byte{byte(len(codes))}, codes...), nil
+		// Maps describe the implemented profile, using Format 2 when needed.
+		return propertyMap(codes), nil
 	case 0xE0:
 		b := make([]byte, 2)
 		binary.BigEndian.PutUint16(b, uint16(int16(s.ambient)))
@@ -161,22 +141,11 @@ func (s *Store) Write(eoj uint32, epc byte, data []byte, source string) error {
 	if !def.Writable {
 		return fmt.Errorf("EPC %02X is read-only", epc)
 	}
-	if len(data) != 1 {
-		return fmt.Errorf("EPC %02X needs one byte", epc)
+	if len(data) == 0 {
+		return fmt.Errorf("EPC %02X needs data", epc)
 	}
-	valid := false
-	switch epc {
-	case 0x80:
-		valid = data[0] == 0x30 || data[0] == 0x31
-	case 0xB0:
-		if eoj == Light {
-			valid = data[0] <= 100
-		} else {
-			valid = data[0] == 0x42 || data[0] == 0x43 || data[0] == 0x45
-		}
-	case 0xB3:
-		valid = data[0] >= 16 && data[0] <= 30
-	}
+	valid := validValue(eoj, epc, data)
+
 	if !valid {
 		return fmt.Errorf("unsupported value %X for EPC %02X", data, epc)
 	}
@@ -184,6 +153,7 @@ func (s *Store) Write(eoj uint32, epc byte, data []byte, source string) error {
 		d.data[epc] = slices.Clone(data)
 		s.revision++
 		s.logLocked("STATE", source, fmt.Sprintf("%06X / %02X = %X", eoj, epc, data), nil)
+		s.notifyLocked(eoj, epc)
 	}
 	return nil
 }
@@ -199,6 +169,8 @@ func (s *Store) InjectAmbient(tenths int, source string) error {
 		s.ambient = tenths
 		s.revision++
 		s.logLocked("INPUT", source, fmt.Sprintf("ambient %.1f C", float64(tenths)/10), nil)
+		s.notifyLocked(Sensor, 0xE0)
+		s.notifyLocked(Aircon, 0xBB)
 	}
 	return nil
 }
@@ -238,7 +210,7 @@ func (s *Store) Snapshot() Snapshot {
 		}
 		if eoj == Aircon {
 			v.Target = int(d.data[0xB3][0])
-			v.Mode = map[byte]string{0x42: "cool", 0x43: "heat", 0x45: "fan"}[d.data[0xB0][0]]
+			v.Mode = map[byte]string{0x40: "other", 0x41: "auto", 0x42: "cool", 0x43: "heat", 0x44: "dry", 0x45: "fan"}[d.data[0xB0][0]]
 		}
 		for _, def := range d.definitions {
 			b, _ := s.valueLocked(eoj, def.EPC)

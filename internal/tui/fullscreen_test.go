@@ -370,3 +370,30 @@ func TestDashboardCtrlCFromSearchConfirms(t *testing.T) {
 		t.Fatal("cancel failed to restore search without mutation")
 	}
 }
+
+func TestDashboardAirconRangeBeforeMutation(t *testing.T) {
+	for _, entry := range []struct {
+		value string
+		want  int
+		valid bool
+	}{{"0", 0, true}, {"50", 50, true}, {"51", 24, false}, {"253", 24, false}} {
+		t.Run(entry.value, func(t *testing.T) {
+			d, _ := dashboard(t)
+			press(d, tcell.KeyDown, 0)
+			press(d, tcell.KeyEnter, 0)
+			press(d, tcell.KeyEnter, 0)
+			form := d.modal.(*tview.Form)
+			before := d.store.Snapshot().Revision
+			form.GetFormItem(0).(*tview.Checkbox).SetChecked(true)
+			form.GetFormItem(2).(*tview.InputField).SetText(entry.value)
+			form.GetButton(0).InputHandler()(tcell.NewEventKey(tcell.KeyEnter, 0, 0), d.focus)
+			after := d.store.Snapshot()
+			if after.Devices[1].Target != entry.want {
+				t.Fatal(after.Devices[1])
+			}
+			if !entry.valid && (after.Revision != before || d.modal == nil) {
+				t.Fatal("invalid form partially mutated state")
+			}
+		})
+	}
+}
