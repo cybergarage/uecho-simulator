@@ -25,7 +25,7 @@ Any future physical/network trial must use an explicitly selected isolated test 
 
 ## Proposed release packages
 
-Publish `uecho-simulator-v1.0.0-darwin-arm64.tar.gz`, `uecho-simulator-v1.0.0-linux-arm64.tar.gz`, and `SHA256SUMS`. A package should contain the binary named `uecho-simulator`, README.md, LICENSE, THIRD_PARTY_NOTICES.md, docs (including images and this release note), and BUILD-INFO.txt. Record the exact commit, exact Go patch version, target OS/arch, build command and pinned module version. Exclude go.work, local credentials, generated room.svg and local caches. A source archive may be supplied separately.
+Publish `uecho-simulator-v1.0.0-darwin-arm64.tar.gz`, `uecho-simulator-v1.0.0-linux-arm64.tar.gz`, and `SHA256SUMS`. A package should contain the binary named `uecho-simulator`, README.md, LICENSE, docs (including images and this release note), and BUILD-INFO.txt. Record the exact commit, exact Go patch version, target OS/arch, build command and pinned module version. Exclude go.work, local credentials, generated room.svg and local caches. A source archive may be supplied separately.
 
 For reproducible binaries, use the same exact Go patch version on every rebuild (initial validation: Go 1.25.1), the same commit and pinned go.sum, and:
 
