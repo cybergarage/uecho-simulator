@@ -2,6 +2,8 @@
 
 A small ECHONET Lite room simulator powered by [uecho-go](https://github.com/cybergarage/uecho-go). It runs on Mac/Linux and Raspberry Pi 4/5 without extra equipment. Raspberry Pi Pico is outside this project's scope.
 
+![Read-only browser display](docs/images/preview.png)
+
 The default mode is fully offline: requests are encoded, decoded and handled in memory. It opens no sockets, discovers no devices and sends no advertisements. The virtual profiles target ECHONET Lite v1.14 and Appendix Release R rev.4. See the supported properties and transport modes below; this is not a certified appliance or an implementation of the entire MRA.
 
 ## Quick start
