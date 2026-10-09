@@ -1,39 +1,23 @@
-# v1.0.0 preparation
+# v1.1.0
 
-This document describes the proposed first release. It creates no tag or GitHub Release. Merge the device-completion PR and explicitly approve publication before running a release workflow.
+## Changes and migration
 
-## Scope
+Normal startup now enables ECHONET Lite IPv4 UDP and multicast on one selected network interface. `make preview`, `make tui`, and the plain interface use the same selection policy. One usable interface is selected automatically; several interfaces open a keyboard picker showing names and IPv4 addresses. Up/Down selects, Enter starts, and Esc cancels. Loopback, down, IPv6-only and non-multicast interfaces are excluded. Multiple IPv4 addresses use the first address in sorted order.
 
-- Three virtual device instances (general lighting, home AC, temperature sensor) and one node profile, based on ECHONET Lite v1.14 / Appendix Release R rev.4.
-- Mandatory properties for these constrained functions, accurate property maps, instance-list discovery and instance 00 handling.
-- Get, SetI, SetC, SetGet, INF_REQ, INFC reception, partial-error responses and required state-change INF.
-- UDP destination port 3610; IPv4 multicast on one selected interface by default; explicit offline/demo and legacy manual loopback modes.
-- Selection TUI, read-only event-driven browser display and 800×480 SVG export.
-- AC target range 0–50°C; undefined writes are rejected because automatic temperature control is not implemented.
+Use `--offline` when migrating scripts or workflows that relied on the v1.0.0 offline default. `--demo`, `make demo`, `make export` and `--help` remain independent of network interfaces. Headless startup with several candidates requires `--interface NAME`; no candidate fails with an explanation. Existing explicit `--udp`, `--allow-lan` and `--multicast-interface` flags remain available.
 
-This is virtual device functionality, not appliance certification or implementation of every optional MRA function. IPv6, persistence, physical Pi, household LAN, multicast on real interfaces and hardware displays are outside the completed verification. General lighting only supports main lighting mode; no automatic/night/color behavior is advertised. Experimental manufacturer and process IDs are used.
+The selected interface receives on UDP 3610 and joins 224.0.23.0:3610. Startup D5 and required state-change notifications are enabled. HTTP stays on loopback. Linux multicast reception is limited to the socket's own membership. The pinned uecho-go dependency is unchanged.
 
-## Verification before publication
+## Verification and remaining limits
 
-1. Select the exact merged commit; confirm its macOS and Ubuntu Check jobs pass.
-2. Download the pinned dependencies, set `GOWORK=off`, and run `./scripts/check.sh` with the network denied. This checks formatting, vet, normal/race tests, both arm64 builds and offline demo/export.
-3. Run the opt-in controller → UDP → shared model → SSE display test only in localhost or a Linux network namespace with loopback enabled. The test receives on port 3610 and sends from an independent ephemeral port.
-4. The injected datagram test validates multicast startup D5, D6 discovery, instance 00, fixed-port replies, INF_REQ routing, ordered changes and both-socket shutdown. A separate Ubuntu CI test creates a dummy interface inside an isolated namespace and validates OS multicast membership/startup/discovery/notifications. It refuses to run when other interfaces are present. Neither test validates physical interfaces or macOS multicast.
-5. Run each produced binary's `--demo --plain` on its supported host before claiming native execution there. Cross-compilation alone is not Raspberry Pi execution.
+Mac and Ubuntu CI cover formatting, vet, tests/race, darwin/arm64 and linux/arm64 builds, offline demo/export/help, injected interface selection and transport failure/cleanup. Ubuntu additionally verifies loopback controller-to-display and IPv4 multicast in isolated network namespaces. Offline TUI exit and terminal restoration were checked in a PTY.
 
-Any future physical/network trial must use an explicitly selected isolated test network and existing authorization. No LAN discovery or hardware trials are prerequisites silently performed by this repository's normal checks.
+The real-environment check is limited to M6 controller -> M4 simulator lighting ON/OFF, with SetC followed by Get returning the matching status. This is not a claim of physical-appliance interoperability, physical Raspberry Pi execution, AC/sensor interoperability, or exhaustive macOS/multiple-NIC multicast verification. No new LAN test is performed during release preparation.
 
-## Proposed release packages
+Multicast sockets retain SO_REUSEADDR: another reuse-enabled process can share UDP 3610. An ordinary exclusive bind conflict fails startup; sharing between reuse-enabled processes is not prevented. Interface failure/hotplug recovery, IPv6, persistence, every optional MRA function, signing/notarization and hardware drivers are not implemented or verified. Virtual device state is volatile.
 
-Publish `uecho-simulator-v1.0.0-darwin-arm64.tar.gz`, `uecho-simulator-v1.0.0-linux-arm64.tar.gz`, and `SHA256SUMS`. A package should contain the binary named `uecho-simulator`, README.md, LICENSE, docs (including images and this release note), and BUILD-INFO.txt. Record the exact commit, exact Go patch version, target OS/arch, build command and pinned module version. Exclude go.work, local credentials, generated room.svg and local caches. A source archive may be supplied separately.
+## Binary packages
 
-For reproducible binaries, use the same exact Go patch version on every rebuild (initial validation: Go 1.25.1), the same commit and pinned go.sum, and:
+Assets are `uecho-simulator-v1.1.0-darwin-arm64.tar.gz`, `uecho-simulator-v1.1.0-linux-arm64.tar.gz`, and an archive-level `SHA256SUMS`. Each archive includes the binary, VERSION, BUILD-INFO.txt with exact source SHA/toolchain/dependency, RUNNING.md, README.md, LICENSE, docs/images, THIRD_PARTY_NOTICES.md and internal file-level SHA256SUMS.
 
-```sh
-export GOWORK=off GOPROXY=off GOTOOLCHAIN=local
-GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags='-s -w' -o bin/uecho-simulator-darwin-arm64 ./cmd/uecho-simulator
-GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags='-s -w' -o bin/uecho-simulator-linux-arm64 ./cmd/uecho-simulator
-shasum -a 256 bin/uecho-simulator-*
-```
-
-Build twice in clean source trees and compare binary SHA-256 values. For identical archives, use one fixed GNU tar version, stable filename sorting, the selected commit time as every file's mtime, uid/gid 0, and `gzip -n`; do not assume BSD tar and GNU tar produce identical archives. BUILD-INFO must use fixed commit metadata rather than wall-clock build timestamps. Archive reproducibility and publication remain release-stage checks; no packages have been published by this PR.
+Build from the exact merged release commit with GOWORK=off, CGO_ENABLED=0, -trimpath, -buildvcs=false and -ldflags='-s -w'. Verify archive and internal checksums, executable target formats, version/build metadata, and native Mac offline demo/export. Cross-compilation alone does not verify Linux execution. The GitHub Release records the final source SHA, CI and package verification.
